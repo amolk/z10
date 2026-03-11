@@ -4,9 +4,13 @@
  * Zero-10 CLI
  *
  * Commands:
- *   z10 serve [file]     Start the MCP server (default port 29910)
- *   z10 new [name]       Create a new .z10.html file
- *   z10 info [file]      Show document summary
+ *   z10 serve [file]           Start the MCP server (default port 29910)
+ *   z10 new [name]             Create a new .z10.html file
+ *   z10 info [file]            Show document summary
+ *   z10 branch [name]          Create/list design branches
+ *   z10 diff <ref1>..<ref2>    Semantic diff of .z10.html files
+ *   z10 merge <branch>         Merge a design branch
+ *   z10 sync --design <file>   Check design file sync status
  */
 
 import { readFile, writeFile } from 'node:fs/promises';
@@ -15,6 +19,7 @@ import { startServer } from '../mcp/server.js';
 import { createDocument, addNode, createNode, addPage, setTokens } from '../core/document.js';
 import { serializeZ10Html } from '../format/serializer.js';
 import { parseZ10Html } from '../format/parser.js';
+import { cmdBranch, cmdDiff, cmdMerge, cmdSync } from './git.js';
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -29,6 +34,18 @@ async function main(): Promise<void> {
       break;
     case 'info':
       await cmdInfo();
+      break;
+    case 'branch':
+      await cmdBranch(args.slice(1));
+      break;
+    case 'diff':
+      await cmdDiff(args.slice(1));
+      break;
+    case 'merge':
+      await cmdMerge(args.slice(1));
+      break;
+    case 'sync':
+      await cmdSync(args.slice(1));
       break;
     case '--help':
     case '-h':
@@ -124,20 +141,27 @@ function printHelp(): void {
 Zero-10 CLI — Branchable UI evolution for the agent era
 
 Usage:
-  z10 serve [file]     Start the MCP server (default port 29910)
-  z10 new [name]       Create a new .z10.html file
-  z10 info <file>      Show document summary
-  z10 --version        Show version
-  z10 --help           Show this help
+  z10 serve [file]           Start the MCP server (default port 29910)
+  z10 new [name]             Create a new .z10.html file
+  z10 info <file>            Show document summary
+  z10 branch [name]          Create/list design branches (z10/ prefixed)
+  z10 diff <ref1>..<ref2>    Semantic diff of .z10.html between Git refs
+  z10 merge <branch> [--into <target>]  Merge a design branch
+  z10 sync --design <file> [--source <dir>]  Check design file status
+  z10 --version              Show version
+  z10 --help                 Show this help
 
 MCP Connection:
   claude mcp add zero10 --transport http http://127.0.0.1:29910/mcp --scope user
 
 Examples:
-  z10 new "My App"                    Create my-app.z10.html
-  z10 serve my-app.z10.html           Start server with file
-  z10 serve my-app.z10.html --port 3000
-  z10 info my-app.z10.html            Show document info
+  z10 new "My App"                         Create my-app.z10.html
+  z10 serve my-app.z10.html                Start server with file
+  z10 info my-app.z10.html                 Show document info
+  z10 branch "dark-mode-exploration"       Create a design branch
+  z10 diff main..z10/dark-mode-exploration Semantic diff between branches
+  z10 merge dark-mode-exploration --into main
+  z10 sync --design app.z10.html           Check design status
 `.trim());
 }
 
