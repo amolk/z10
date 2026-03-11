@@ -17,12 +17,22 @@
     "lint": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
-  "keywords": ["design", "ui", "agent", "mcp", "html", "css"],
+  "keywords": [
+    "design",
+    "ui",
+    "agent",
+    "mcp",
+    "html",
+    "css"
+  ],
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@vitest/coverage-v8": "^3.0.0",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0",
-    "@vitest/coverage-v8": "^3.0.0"
+    "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1"
   }
 }
