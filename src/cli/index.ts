@@ -11,6 +11,7 @@
  *   z10 diff <ref1>..<ref2>    Semantic diff of .z10.html files
  *   z10 merge <branch>         Merge a design branch
  *   z10 sync --design <file>   Check design file sync status
+ *   z10 export <file>          Export to React + Tailwind code
  *   z10 config <file> [key] [value]  Get/set config values
  */
 
@@ -22,6 +23,7 @@ import { serializeZ10Html } from '../format/serializer.js';
 import { parseZ10Html } from '../format/parser.js';
 import { cmdBranch, cmdDiff, cmdMerge, cmdSync } from './git.js';
 import { getConfigValue, setConfigValue, CONFIG_KEYS } from '../core/config.js';
+import { exportReact } from '../export/react.js';
 import type { ProjectConfig } from '../core/types.js';
 
 const args = process.argv.slice(2);
@@ -52,6 +54,9 @@ async function main(): Promise<void> {
       break;
     case 'config':
       await cmdConfig();
+      break;
+    case 'export':
+      await cmdExport();
       break;
     case '--help':
     case '-h':
@@ -195,6 +200,42 @@ async function cmdConfig(): Promise<void> {
   console.log(`${key}=${value}`);
 }
 
+async function cmdExport(): Promise<void> {
+  const filePath = args[1];
+  if (!filePath) {
+    console.error('Usage: z10 export <file.z10.html> [--id <nodeId>] [--out <output.tsx>] [--js]');
+    process.exit(1);
+  }
+
+  const html = await readFile(resolve(filePath), 'utf-8');
+  const doc = parseZ10Html(html);
+
+  const idFlag = args.indexOf('--id');
+  const id = idFlag !== -1 ? args[idFlag + 1] : undefined;
+  const useJs = args.includes('--js');
+
+  const result = exportReact(doc, { id, typescript: !useJs, includeTokens: true });
+
+  const outFlag = args.indexOf('--out');
+  if (outFlag !== -1 && args[outFlag + 1]) {
+    const outPath = resolve(args[outFlag + 1]!);
+    await writeFile(outPath, result.code, 'utf-8');
+    console.log(`Exported: ${outPath}`);
+    if (result.tokensCss) {
+      const cssPath = outPath.replace(/\.\w+$/, '.tokens.css');
+      await writeFile(cssPath, result.tokensCss, 'utf-8');
+      console.log(`Tokens: ${cssPath}`);
+    }
+    console.log(`Components: ${result.components.join(', ')}`);
+  } else {
+    console.log(result.code);
+    if (result.tokensCss) {
+      console.log('\n/* --- tokens.css --- */');
+      console.log(result.tokensCss);
+    }
+  }
+}
+
 function printHelp(): void {
   console.log(`
 Zero-10 CLI — Branchable UI evolution for the agent era
@@ -203,6 +244,7 @@ Usage:
   z10 serve [file]           Start the MCP server (default port 29910)
   z10 new [name]             Create a new .z10.html file
   z10 info <file>            Show document summary
+  z10 export <file> [--id <id>] [--out <file>] [--js]  Export to React + Tailwind
   z10 config <file> [key] [value]  Get/set project configuration
   z10 branch [name]          Create/list design branches (z10/ prefixed)
   z10 diff <ref1>..<ref2>    Semantic diff of .z10.html between Git refs

@@ -18,8 +18,10 @@ import { serializeZ10Html } from '../format/serializer.js';
 import {
   READ_TOOLS,
   WRITE_TOOLS,
+  UTILITY_TOOLS,
   handleReadTool,
   handleWriteTool,
+  handleUtilityTool,
   type ToolArgs,
   jsonSchemaToZodShape,
 } from './tools.js';
@@ -114,6 +116,20 @@ export function createMcpServer(): McpServer {
           }
         }
 
+        return { content: [{ type: 'text' as const, text: result }] };
+      },
+    );
+  }
+
+  // Register utility tools
+  for (const tool of UTILITY_TOOLS) {
+    const zodShape = jsonSchemaToZodShape(tool.inputSchema);
+    server.tool(
+      tool.name,
+      tool.description,
+      zodShape,
+      async (args: ToolArgs) => {
+        const result = handleUtilityTool(currentDoc, tool.name, args);
         return { content: [{ type: 'text' as const, text: result }] };
       },
     );

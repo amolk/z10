@@ -1,7 +1,8 @@
 # Ralph Fix Plan
 
 ## High Priority
-(all complete)
+- [x] Follow instructions in README.md to check if editing works through claude
+- [x] Plan and implement Phase 2 (export_react — core Phase 2 feature for CLI/core library)
 
 ## Medium Priority
 - [x] Implement CLI tool (z10 branch, z10 diff, z10 sync)
@@ -11,7 +12,8 @@
 
 ## Low Priority
 - [ ] Performance optimization
-- [ ] Extended feature set (export_react, visual diff)
+- [x] Extended feature set: export_react (React + Tailwind code generation)
+- [ ] Extended feature set: visual diff (rendered visual diffs)
 - [ ] Integration with external services
 - [ ] Advanced error recovery
 
@@ -33,6 +35,7 @@
 - [x] Add Z10 runtime (faker, template instantiation, mode switching) — 66 tests
 - [x] Add configuration management (validation, CLI get/set, config file support) — 24 tests
 - [x] Create user documentation (comprehensive README with CLI, MCP, format, runtime docs)
+- [x] Implement export_react (React + Tailwind export) — MCP utility tool, CLI command, 20 tests
 
 ## Notes
 - Focus on MVP functionality first

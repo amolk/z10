@@ -21,6 +21,7 @@ import {
   executeCommand,
   serializeStyle,
 } from '../core/index.js';
+import { exportReact } from '../export/react.js';
 
 // ---------------------------------------------------------------------------
 // Tool Schemas (JSON Schema format for MCP)
@@ -275,6 +276,22 @@ export const WRITE_TOOLS: ToolDefinition[] = [
   },
 ];
 
+export const UTILITY_TOOLS: ToolDefinition[] = [
+  {
+    name: 'export_react',
+    description: 'Generate React + Tailwind code from the Z10 document or a subtree',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Node ID to export (optional, exports all pages if omitted)' },
+        includeTokens: { type: 'boolean', description: 'Include design tokens as CSS (default: true)' },
+        typescript: { type: 'boolean', description: 'Generate TypeScript (default: true)' },
+      },
+      required: [],
+    },
+  },
+];
+
 // ---------------------------------------------------------------------------
 // Tool Handlers
 // ---------------------------------------------------------------------------
@@ -292,6 +309,22 @@ export function handleReadTool(doc: Z10Document, name: string, args: ToolArgs): 
     case 'get_tokens': return handleGetTokens(doc, args['collection'] as string | undefined);
     case 'get_guide': return handleGetGuide(args['topic'] as string | undefined);
     default: return JSON.stringify({ error: `Unknown read tool: ${name}` });
+  }
+}
+
+/** Handle a utility tool call */
+export function handleUtilityTool(doc: Z10Document, name: string, args: ToolArgs): string {
+  switch (name) {
+    case 'export_react': {
+      const result = exportReact(doc, {
+        id: args['id'] as string | undefined,
+        includeTokens: args['includeTokens'] as boolean | undefined,
+        typescript: args['typescript'] as boolean | undefined,
+      });
+      return JSON.stringify(result, null, 2);
+    }
+    default:
+      return JSON.stringify({ error: `Unknown utility tool: ${name}` });
   }
 }
 
