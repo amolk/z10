@@ -10,8 +10,10 @@ import {
 import {
   handleReadTool,
   handleWriteTool,
+  handleUtilityTool,
   READ_TOOLS,
   WRITE_TOOLS,
+  UTILITY_TOOLS,
 } from '../../src/mcp/tools.js';
 import type { Z10Document, ComponentSchema } from '../../src/core/types.js';
 
@@ -245,6 +247,105 @@ describe('MCP Tools', () => {
     it('returns error for unknown tool', () => {
       const result = JSON.parse(handleWriteTool(doc, 'unknown_tool', {}));
       expect(result.error).toContain('Unknown');
+    });
+  });
+
+  describe('Utility Tools', () => {
+    it('has find_placement in UTILITY_TOOLS', () => {
+      const tool = UTILITY_TOOLS.find(t => t.name === 'find_placement');
+      expect(tool).toBeDefined();
+      expect(tool!.description).toContain('canvas position');
+    });
+
+    it('find_placement returns placement for page root', () => {
+      const result = JSON.parse(handleUtilityTool(doc, 'find_placement', {}));
+      expect(result.parent).toBe('page_root');
+      expect(result.insertIndex).toBe(1); // header is already there
+      expect(result.siblingCount).toBe(1);
+      expect(result.layout).toBeDefined();
+      expect(result.suggestion).toBeDefined();
+    });
+
+    it('find_placement accepts explicit parent', () => {
+      const result = JSON.parse(handleUtilityTool(doc, 'find_placement', { parent: 'header' }));
+      expect(result.parent).toBe('header');
+      expect(result.layout).toBe('flex-row'); // header has display: flex
+    });
+
+    it('find_placement errors on unknown parent', () => {
+      const result = JSON.parse(handleUtilityTool(doc, 'find_placement', { parent: 'nonexistent' }));
+      expect(result.error).toContain('PARENT_NOT_FOUND');
+    });
+
+    it('find_placement handles near node', () => {
+      const result = JSON.parse(handleUtilityTool(doc, 'find_placement', { parent: 'header', near: 'title' }));
+      expect(result.parent).toBe('header');
+      expect(result.insertIndex).toBe(1); // after title (index 0)
+      expect(result.suggestion).toContain('title');
+    });
+
+    it('find_placement handles before position', () => {
+      const result = JSON.parse(handleUtilityTool(doc, 'find_placement', { parent: 'header', near: 'title', position: 'before' }));
+      expect(result.insertIndex).toBe(0); // before title
+    });
+
+    it('find_placement suggests styles with size', () => {
+      const result = JSON.parse(handleUtilityTool(doc, 'find_placement', { size: { width: 200, height: 100 } }));
+      expect(result.recommendedStyle).toBeDefined();
+      expect(result.recommendedStyle.width).toBe('200px');
+      expect(result.recommendedStyle.height).toBe('100px');
+    });
+
+    it('find_placement handles inside position', () => {
+      const result = JSON.parse(handleUtilityTool(doc, 'find_placement', { near: 'header', position: 'inside' }));
+      expect(result.parent).toBe('header');
+      expect(result.suggestion).toContain('inside');
+    });
+
+    it('reconcile reports healthy document', () => {
+      const result = JSON.parse(handleUtilityTool(doc, 'reconcile', {}));
+      expect(result.status).toBe('healthy');
+      expect(result.summary.totalNodes).toBe(3); // page_root, header, title
+      expect(result.summary.totalPages).toBe(1);
+      expect(result.summary.totalComponents).toBe(1); // Button
+      expect(result.issues).toEqual([]);
+    });
+
+    it('reconcile reports component usage', () => {
+      // Add a Button instance
+      const btnNode = createNode({
+        id: 'btn1', tag: 'div', parent: 'header',
+        componentName: 'Button', componentProps: { variant: 'primary' },
+      });
+      addNode(doc, btnNode);
+
+      const result = JSON.parse(handleUtilityTool(doc, 'reconcile', {}));
+      expect(result.components.usage.Button).toBe(1);
+      expect(result.components.unusedDefinitions).toEqual([]);
+    });
+
+    it('reconcile detects unused components', () => {
+      const result = JSON.parse(handleUtilityTool(doc, 'reconcile', {}));
+      // Button is defined but not instantiated in the base test doc
+      expect(result.components.unusedDefinitions).toContain('Button');
+    });
+
+    it('reconcile reports intent classification', () => {
+      const result = JSON.parse(handleUtilityTool(doc, 'reconcile', {}));
+      expect(result.classification.byIntent).toBeDefined();
+      expect(result.classification.byIntent.layout).toBeGreaterThan(0);
+    });
+
+    it('reconcile detects token references', () => {
+      const result = JSON.parse(handleUtilityTool(doc, 'reconcile', {}));
+      expect(result.tokens).toBeDefined();
+      expect(result.summary.totalTokens).toBeGreaterThan(0);
+    });
+
+    it('reconcile includes source note when source provided', () => {
+      const result = JSON.parse(handleUtilityTool(doc, 'reconcile', { source: './src' }));
+      expect(result.reconciliation).toBeDefined();
+      expect(result.reconciliation.sourceDir).toBe('./src');
     });
   });
 });

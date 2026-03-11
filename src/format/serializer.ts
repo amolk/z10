@@ -37,6 +37,9 @@ export function serializeZ10Html(doc: Z10Document): string {
     parts.push(serializeComponent(component));
   }
 
+  // CSS reset for proper rendering
+  parts.push('<style data-z10-role="reset">\n*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }\nhtml, body { width: 100%; height: 100%; }\n</style>');
+
   parts.push('</head>');
 
   // Body with pages

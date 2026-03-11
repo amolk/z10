@@ -24,6 +24,19 @@
   --blue-600: #2563eb;
   --white: #ffffff;
   --black: #000000;
+  --indigo-50: #eef2ff;
+  --indigo-100: #e0e7ff;
+  --indigo-500: #6366f1;
+  --indigo-600: #4f46e5;
+  --indigo-700: #4338ca;
+  --green-50: #f0fdf4;
+  --green-500: #22c55e;
+  --green-600: #16a34a;
+  --amber-50: #fffbeb;
+  --amber-500: #f59e0b;
+  --red-50: #fef2f2;
+  --red-500: #ef4444;
+  --gray-25: #fcfcfd;
 }
 </style>
 <style data-z10-tokens="semantic">
@@ -35,16 +48,304 @@
   --text: var(--gray-900);
   --text-secondary: var(--gray-500);
   --border: var(--gray-200);
+  --brand: var(--indigo-600);
+  --brand-light: var(--indigo-50);
+  --brand-hover: var(--indigo-700);
+  --success: var(--green-500);
+  --success-light: var(--green-50);
+  --warning: var(--amber-500);
+  --warning-light: var(--amber-50);
+  --danger: var(--red-500);
+  --danger-light: var(--red-50);
+  --surface: var(--gray-25);
+  --card: var(--white);
+  --sidebar-bg: var(--gray-900);
+  --sidebar-text: var(--gray-300);
 }
+</style>
+<style data-z10-role="reset">
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; }
 </style>
 </head>
 <body>
-<div data-z10-page="Page 1" data-z10-mode="light" data-z10-id="page_root">
-  <div data-z10-id="sup_pane" data-z10-editor="agent" style="padding: 24px; background: var(--bg-secondary); border-radius: 12px; border: 1px solid var(--border); max-width: 400px; margin: 20px auto; text-align: center">
-    <span data-z10-id="sup_text" data-z10-editor="agent" style="font-size: 24px; font-weight: bold; color: var(--text)">
-      'Sup
-    </span>
-  </div>
+<div data-z10-page="Page 1" data-z10-mode="light" data-z10-id="page_root" style="display: flex; flex-direction: row; min-height: 100vh; background: var(--surface); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+  <nav data-z10-id="sidebar" data-z10-intent="layout" data-z10-editor="agent" style="width: 240px; background: var(--sidebar-bg); color: var(--sidebar-text); padding: 24px 0; display: flex; flex-direction: column; flex-shrink: 0">
+    <div data-z10-id="sidebar_brand" data-z10-editor="agent" style="padding: 0 20px 24px; border-bottom: 1px solid var(--gray-700); margin-bottom: 16px">
+      <span data-z10-id="sidebar_logo" data-z10-editor="agent" style="font-size: 20px; font-weight: 700; color: var(--white); letter-spacing: -0.02em">
+        Qualtrics
+      </span>
+    </div>
+    <div data-z10-id="nav_list" data-z10-editor="agent" style="display: flex; flex-direction: column; gap: 2px; padding: 0 8px">
+      <div data-z10-id="nav_dashboard" data-z10-intent="interaction" data-z10-editor="agent" style="padding: 10px 12px; border-radius: 6px; background: var(--indigo-600); color: var(--white); font-size: 14px; font-weight: 500; cursor: pointer">
+        <span data-z10-id="nav_dashboard_txt" data-z10-editor="agent">
+          Dashboard
+        </span>
+      </div>
+      <div data-z10-id="nav_surveys" data-z10-intent="interaction" data-z10-editor="agent" style="padding: 10px 12px; border-radius: 6px; color: var(--gray-400); font-size: 14px; font-weight: 500; cursor: pointer">
+        <span data-z10-id="nav_surveys_txt" data-z10-editor="agent">
+          Surveys
+        </span>
+      </div>
+      <div data-z10-id="nav_responses" data-z10-intent="interaction" data-z10-editor="agent" style="padding: 10px 12px; border-radius: 6px; color: var(--gray-400); font-size: 14px; font-weight: 500; cursor: pointer">
+        <span data-z10-id="nav_responses_txt" data-z10-editor="agent">
+          Responses
+        </span>
+      </div>
+      <div data-z10-id="nav_contacts" data-z10-intent="interaction" data-z10-editor="agent" style="padding: 10px 12px; border-radius: 6px; color: var(--gray-400); font-size: 14px; font-weight: 500; cursor: pointer">
+        <span data-z10-id="nav_contacts_txt" data-z10-editor="agent">
+          Contacts
+        </span>
+      </div>
+      <div data-z10-id="nav_reports" data-z10-intent="interaction" data-z10-editor="agent" style="padding: 10px 12px; border-radius: 6px; color: var(--gray-400); font-size: 14px; font-weight: 500; cursor: pointer">
+        <span data-z10-id="nav_reports_txt" data-z10-editor="agent">
+          Reports
+        </span>
+      </div>
+      <div data-z10-id="nav_settings" data-z10-intent="interaction" data-z10-editor="agent" style="padding: 10px 12px; border-radius: 6px; color: var(--gray-400); font-size: 14px; font-weight: 500; cursor: pointer">
+        <span data-z10-id="nav_settings_txt" data-z10-editor="agent">
+          Settings
+        </span>
+      </div>
+    </div>
+  </nav>
+  <main data-z10-id="main" data-z10-intent="layout" data-z10-editor="agent" style="flex: 1; display: flex; flex-direction: column; overflow-y: auto">
+    <header data-z10-id="topbar" data-z10-intent="layout" data-z10-editor="agent" style="display: flex; align-items: center; justify-content: space-between; padding: 16px 32px; background: var(--card); border-bottom: 1px solid var(--border)">
+      <div data-z10-id="topbar_left" data-z10-editor="agent">
+        <span data-z10-id="page_title" data-z10-editor="agent" style="font-size: 20px; font-weight: 600; color: var(--text)">
+          Experience Dashboard
+        </span>
+      </div>
+      <div data-z10-id="topbar_right" data-z10-editor="agent" style="display: flex; align-items: center; gap: 12px">
+        <div data-z10-id="date_filter" data-z10-intent="interaction" data-z10-editor="agent" style="padding: 8px 14px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; color: var(--text-secondary); cursor: pointer; background: var(--card)">
+          <span data-z10-id="date_filter_txt" data-z10-editor="agent">
+            Last 30 days
+          </span>
+        </div>
+        <div data-z10-id="export_btn" data-z10-intent="interaction" data-z10-editor="agent" style="padding: 8px 16px; background: var(--brand); color: var(--white); border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer">
+          <span data-z10-id="export_btn_txt" data-z10-editor="agent">
+            Export Report
+          </span>
+        </div>
+      </div>
+    </header>
+    <div data-z10-id="content" data-z10-intent="layout" data-z10-editor="agent" style="padding: 24px 32px; display: flex; flex-direction: column; gap: 24px">
+      <div data-z10-id="kpi_row" data-z10-intent="layout" data-z10-editor="agent" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px">
+        <div data-z10-id="kpi_responses" data-z10-intent="design" data-z10-editor="agent" style="background: var(--card); border-radius: 10px; padding: 20px; border: 1px solid var(--border)">
+          <span data-z10-id="kpi_responses_label" data-z10-editor="agent" style="font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; display: block">
+            Total Responses
+          </span>
+          <span data-z10-id="kpi_responses_val" data-z10-editor="agent" style="font-size: 28px; font-weight: 700; color: var(--text); display: block; margin-bottom: 6px">
+            12,847
+          </span>
+          <span data-z10-id="kpi_responses_delta" data-z10-editor="agent" style="font-size: 12px; color: var(--success); font-weight: 500">
+            +18.2% vs last period
+          </span>
+        </div>
+        <div data-z10-id="kpi_nps" data-z10-intent="design" data-z10-editor="agent" style="background: var(--card); border-radius: 10px; padding: 20px; border: 1px solid var(--border)">
+          <span data-z10-id="kpi_nps_label" data-z10-editor="agent" style="font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; display: block">
+            NPS Score
+          </span>
+          <span data-z10-id="kpi_nps_val" data-z10-editor="agent" style="font-size: 28px; font-weight: 700; color: var(--text); display: block; margin-bottom: 6px">
+            72
+          </span>
+          <span data-z10-id="kpi_nps_delta" data-z10-editor="agent" style="font-size: 12px; color: var(--success); font-weight: 500">
+            +4 pts vs last period
+          </span>
+        </div>
+        <div data-z10-id="kpi_csat" data-z10-intent="design" data-z10-editor="agent" style="background: var(--card); border-radius: 10px; padding: 20px; border: 1px solid var(--border)">
+          <span data-z10-id="kpi_csat_label" data-z10-editor="agent" style="font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; display: block">
+            CSAT
+          </span>
+          <span data-z10-id="kpi_csat_val" data-z10-editor="agent" style="font-size: 28px; font-weight: 700; color: var(--text); display: block; margin-bottom: 6px">
+            4.6 / 5.0
+          </span>
+          <span data-z10-id="kpi_csat_delta" data-z10-editor="agent" style="font-size: 12px; color: var(--success); font-weight: 500">
+            +0.3 vs last period
+          </span>
+        </div>
+        <div data-z10-id="kpi_completion" data-z10-intent="design" data-z10-editor="agent" style="background: var(--card); border-radius: 10px; padding: 20px; border: 1px solid var(--border)">
+          <span data-z10-id="kpi_completion_label" data-z10-editor="agent" style="font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; display: block">
+            Completion Rate
+          </span>
+          <span data-z10-id="kpi_completion_val" data-z10-editor="agent" style="font-size: 28px; font-weight: 700; color: var(--text); display: block; margin-bottom: 6px">
+            89.3%
+          </span>
+          <span data-z10-id="kpi_completion_delta" data-z10-editor="agent" style="font-size: 12px; color: var(--warning); font-weight: 500">
+            -1.2% vs last period
+          </span>
+        </div>
+      </div>
+      <div data-z10-id="charts_row" data-z10-intent="layout" data-z10-editor="agent" style="display: grid; grid-template-columns: 2fr 1fr; gap: 16px">
+        <div data-z10-id="chart_trend" data-z10-intent="design" data-z10-editor="agent" style="background: var(--card); border-radius: 10px; padding: 24px; border: 1px solid var(--border)">
+          <span data-z10-id="chart_trend_title" data-z10-editor="agent" style="font-size: 15px; font-weight: 600; color: var(--text); display: block; margin-bottom: 20px">
+            Response Trend
+          </span>
+          <div data-z10-id="chart_trend_area" data-z10-intent="decoration" data-z10-editor="agent" style="height: 200px; background: linear-gradient(180deg, var(--brand-light) 0%, transparent 100%); border-radius: 8px; display: flex; align-items: flex-end; padding: 0 4px; gap: 6px">
+            <div data-z10-id="bar_1" data-z10-intent="decoration" data-z10-editor="agent" style="flex: 1; height: 45%; background: var(--brand); border-radius: 4px 4px 0 0; opacity: 0.7"></div>
+            <div data-z10-id="bar_2" data-z10-intent="decoration" data-z10-editor="agent" style="flex: 1; height: 60%; background: var(--brand); border-radius: 4px 4px 0 0; opacity: 0.75"></div>
+            <div data-z10-id="bar_3" data-z10-intent="decoration" data-z10-editor="agent" style="flex: 1; height: 52%; background: var(--brand); border-radius: 4px 4px 0 0; opacity: 0.8"></div>
+            <div data-z10-id="bar_4" data-z10-intent="decoration" data-z10-editor="agent" style="flex: 1; height: 70%; background: var(--brand); border-radius: 4px 4px 0 0; opacity: 0.85"></div>
+            <div data-z10-id="bar_5" data-z10-intent="decoration" data-z10-editor="agent" style="flex: 1; height: 65%; background: var(--brand); border-radius: 4px 4px 0 0; opacity: 0.8"></div>
+            <div data-z10-id="bar_6" data-z10-intent="decoration" data-z10-editor="agent" style="flex: 1; height: 80%; background: var(--brand); border-radius: 4px 4px 0 0; opacity: 0.9"></div>
+            <div data-z10-id="bar_7" data-z10-intent="decoration" data-z10-editor="agent" style="flex: 1; height: 75%; background: var(--brand); border-radius: 4px 4px 0 0; opacity: 0.85"></div>
+            <div data-z10-id="bar_8" data-z10-intent="decoration" data-z10-editor="agent" style="flex: 1; height: 90%; background: var(--brand); border-radius: 4px 4px 0 0; opacity: 0.95"></div>
+            <div data-z10-id="bar_9" data-z10-intent="decoration" data-z10-editor="agent" style="flex: 1; height: 85%; background: var(--brand); border-radius: 4px 4px 0 0; opacity: 0.9"></div>
+            <div data-z10-id="bar_10" data-z10-intent="decoration" data-z10-editor="agent" style="flex: 1; height: 95%; background: var(--brand); border-radius: 4px 4px 0 0"></div>
+          </div>
+        </div>
+        <div data-z10-id="chart_sentiment" data-z10-intent="design" data-z10-editor="agent" style="background: var(--card); border-radius: 10px; padding: 24px; border: 1px solid var(--border)">
+          <span data-z10-id="chart_sentiment_title" data-z10-editor="agent" style="font-size: 15px; font-weight: 600; color: var(--text); display: block; margin-bottom: 20px">
+            Sentiment Breakdown
+          </span>
+          <div data-z10-id="sentiment_list" data-z10-editor="agent" style="display: flex; flex-direction: column; gap: 16px">
+            <div data-z10-id="sent_promoter" data-z10-editor="agent" style="display: flex; flex-direction: column; gap: 6px">
+              <div data-z10-id="sent_promoter_header" data-z10-editor="agent" style="display: flex; justify-content: space-between; font-size: 13px">
+                <span data-z10-id="sent_promoter_label" data-z10-editor="agent" style="color: var(--text-secondary)">
+                  Promoters
+                </span>
+                <span data-z10-id="sent_promoter_pct" data-z10-editor="agent" style="color: var(--success); font-weight: 600">
+                  64%
+                </span>
+              </div>
+              <div data-z10-id="sent_promoter_bar_bg" data-z10-intent="decoration" data-z10-editor="agent" style="height: 8px; background: var(--gray-100); border-radius: 4px; overflow: hidden">
+                <div data-z10-id="sent_promoter_bar" data-z10-intent="decoration" data-z10-editor="agent" style="width: 64%; height: 100%; background: var(--success); border-radius: 4px"></div>
+              </div>
+            </div>
+            <div data-z10-id="sent_passive" data-z10-editor="agent" style="display: flex; flex-direction: column; gap: 6px">
+              <div data-z10-id="sent_passive_header" data-z10-editor="agent" style="display: flex; justify-content: space-between; font-size: 13px">
+                <span data-z10-id="sent_passive_label" data-z10-editor="agent" style="color: var(--text-secondary)">
+                  Passives
+                </span>
+                <span data-z10-id="sent_passive_pct" data-z10-editor="agent" style="color: var(--warning); font-weight: 600">
+                  24%
+                </span>
+              </div>
+              <div data-z10-id="sent_passive_bar_bg" data-z10-intent="decoration" data-z10-editor="agent" style="height: 8px; background: var(--gray-100); border-radius: 4px; overflow: hidden">
+                <div data-z10-id="sent_passive_bar" data-z10-intent="decoration" data-z10-editor="agent" style="width: 24%; height: 100%; background: var(--warning); border-radius: 4px"></div>
+              </div>
+            </div>
+            <div data-z10-id="sent_detractor" data-z10-editor="agent" style="display: flex; flex-direction: column; gap: 6px">
+              <div data-z10-id="sent_detractor_header" data-z10-editor="agent" style="display: flex; justify-content: space-between; font-size: 13px">
+                <span data-z10-id="sent_detractor_label" data-z10-editor="agent" style="color: var(--text-secondary)">
+                  Detractors
+                </span>
+                <span data-z10-id="sent_detractor_pct" data-z10-editor="agent" style="color: var(--danger); font-weight: 600">
+                  12%
+                </span>
+              </div>
+              <div data-z10-id="sent_detractor_bar_bg" data-z10-intent="decoration" data-z10-editor="agent" style="height: 8px; background: var(--gray-100); border-radius: 4px; overflow: hidden">
+                <div data-z10-id="sent_detractor_bar" data-z10-intent="decoration" data-z10-editor="agent" style="width: 12%; height: 100%; background: var(--danger); border-radius: 4px"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div data-z10-id="table_card" data-z10-intent="design" data-z10-editor="agent" style="background: var(--card); border-radius: 10px; border: 1px solid var(--border); overflow: hidden">
+        <div data-z10-id="table_header" data-z10-editor="agent" style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; border-bottom: 1px solid var(--border)">
+          <span data-z10-id="table_title" data-z10-editor="agent" style="font-size: 15px; font-weight: 600; color: var(--text)">
+            Recent Surveys
+          </span>
+          <span data-z10-id="table_link" data-z10-editor="agent" style="font-size: 13px; color: var(--brand); font-weight: 500; cursor: pointer">
+            View All
+          </span>
+        </div>
+        <div data-z10-id="table_cols" data-z10-editor="agent" style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 100px; padding: 12px 24px; background: var(--surface); border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em">
+          <span data-z10-id="col_name" data-z10-editor="agent">
+            Survey Name
+          </span>
+          <span data-z10-id="col_responses" data-z10-editor="agent">
+            Responses
+          </span>
+          <span data-z10-id="col_completion" data-z10-editor="agent">
+            Completion
+          </span>
+          <span data-z10-id="col_avg" data-z10-editor="agent">
+            Avg. Score
+          </span>
+          <span data-z10-id="col_status" data-z10-editor="agent">
+            Status
+          </span>
+        </div>
+        <div data-z10-id="row_1" data-z10-editor="agent" style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 100px; padding: 14px 24px; border-bottom: 1px solid var(--border); font-size: 14px; align-items: center">
+          <span data-z10-id="r1_name" data-z10-editor="agent" style="color: var(--text); font-weight: 500">
+            Q1 Employee Engagement
+          </span>
+          <span data-z10-id="r1_resp" data-z10-editor="agent" style="color: var(--text-secondary)">
+            4,291
+          </span>
+          <span data-z10-id="r1_comp" data-z10-editor="agent" style="color: var(--text-secondary)">
+            92%
+          </span>
+          <span data-z10-id="r1_avg" data-z10-editor="agent" style="color: var(--text-secondary)">
+            4.7
+          </span>
+          <div data-z10-id="r1_badge" data-z10-intent="design" data-z10-editor="agent" style="background: var(--success-light); color: var(--green-600); padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; text-align: center; width: fit-content">
+            <span data-z10-id="r1_status" data-z10-editor="agent">
+              Active
+            </span>
+          </div>
+        </div>
+        <div data-z10-id="row_2" data-z10-editor="agent" style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 100px; padding: 14px 24px; border-bottom: 1px solid var(--border); font-size: 14px; align-items: center">
+          <span data-z10-id="r2_name" data-z10-editor="agent" style="color: var(--text); font-weight: 500">
+            Product Feedback - v3.2
+          </span>
+          <span data-z10-id="r2_resp" data-z10-editor="agent" style="color: var(--text-secondary)">
+            2,108
+          </span>
+          <span data-z10-id="r2_comp" data-z10-editor="agent" style="color: var(--text-secondary)">
+            87%
+          </span>
+          <span data-z10-id="r2_avg" data-z10-editor="agent" style="color: var(--text-secondary)">
+            4.3
+          </span>
+          <div data-z10-id="r2_badge" data-z10-intent="design" data-z10-editor="agent" style="background: var(--success-light); color: var(--green-600); padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; text-align: center; width: fit-content">
+            <span data-z10-id="r2_status" data-z10-editor="agent">
+              Active
+            </span>
+          </div>
+        </div>
+        <div data-z10-id="row_3" data-z10-editor="agent" style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 100px; padding: 14px 24px; border-bottom: 1px solid var(--border); font-size: 14px; align-items: center">
+          <span data-z10-id="r3_name" data-z10-editor="agent" style="color: var(--text); font-weight: 500">
+            Customer Onboarding NPS
+          </span>
+          <span data-z10-id="r3_resp" data-z10-editor="agent" style="color: var(--text-secondary)">
+            3,562
+          </span>
+          <span data-z10-id="r3_comp" data-z10-editor="agent" style="color: var(--text-secondary)">
+            94%
+          </span>
+          <span data-z10-id="r3_avg" data-z10-editor="agent" style="color: var(--text-secondary)">
+            4.8
+          </span>
+          <div data-z10-id="r3_badge" data-z10-intent="design" data-z10-editor="agent" style="background: var(--gray-100); color: var(--gray-500); padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; text-align: center; width: fit-content">
+            <span data-z10-id="r3_status" data-z10-editor="agent">
+              Closed
+            </span>
+          </div>
+        </div>
+        <div data-z10-id="row_4" data-z10-editor="agent" style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 100px; padding: 14px 24px; font-size: 14px; align-items: center">
+          <span data-z10-id="r4_name" data-z10-editor="agent" style="color: var(--text); font-weight: 500">
+            Website UX Benchmark
+          </span>
+          <span data-z10-id="r4_resp" data-z10-editor="agent" style="color: var(--text-secondary)">
+            2,886
+          </span>
+          <span data-z10-id="r4_comp" data-z10-editor="agent" style="color: var(--text-secondary)">
+            83%
+          </span>
+          <span data-z10-id="r4_avg" data-z10-editor="agent" style="color: var(--text-secondary)">
+            4.1
+          </span>
+          <div data-z10-id="r4_badge" data-z10-intent="design" data-z10-editor="agent" style="background: var(--warning-light); color: var(--amber-500); padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; text-align: center; width: fit-content">
+            <span data-z10-id="r4_status" data-z10-editor="agent">
+              Draft
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
 </div>
 </body>
 </html>

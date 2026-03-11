@@ -22,6 +22,8 @@ import {
   serializeStyle,
 } from '../core/index.js';
 import { exportReact } from '../export/react.js';
+import { exportVue } from '../export/vue.js';
+import { exportSvelte } from '../export/svelte.js';
 
 // ---------------------------------------------------------------------------
 // Tool Schemas (JSON Schema format for MCP)
@@ -290,6 +292,68 @@ export const UTILITY_TOOLS: ToolDefinition[] = [
       required: [],
     },
   },
+  {
+    name: 'export_vue',
+    description: 'Generate Vue 3 SFC code from the Z10 document or a subtree',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Node ID to export (optional, exports all pages if omitted)' },
+        includeTokens: { type: 'boolean', description: 'Include design tokens as CSS (default: true)' },
+        typescript: { type: 'boolean', description: 'Use TypeScript in script setup (default: true)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'export_svelte',
+    description: 'Generate Svelte component code from the Z10 document or a subtree',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Node ID to export (optional, exports all pages if omitted)' },
+        includeTokens: { type: 'boolean', description: 'Include design tokens as CSS (default: true)' },
+        typescript: { type: 'boolean', description: 'Use TypeScript in script tag (default: true)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'find_placement',
+    description: 'Suggest a canvas position and parent for placing a new element. Analyzes existing layout to find optimal placement.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        parent: { type: 'string', description: 'Target parent node ID (optional, defaults to current page root)' },
+        size: {
+          type: 'object',
+          description: 'Desired element size in pixels (optional)',
+          properties: {
+            width: { type: 'number' },
+            height: { type: 'number' },
+          },
+        },
+        near: { type: 'string', description: 'Place near this node ID (optional)' },
+        position: {
+          type: 'string',
+          enum: ['after', 'before', 'inside', 'auto'],
+          description: 'Placement relative to parent or near node (default: auto)',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'reconcile',
+    description: 'Analyze the design document for consistency and report node statistics, orphaned nodes, missing parents, and component usage. Optionally validate against a source directory.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        source: { type: 'string', description: 'Source directory to compare against (optional, for future reconciliation pipeline)' },
+      },
+      required: [],
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -323,6 +387,26 @@ export function handleUtilityTool(doc: Z10Document, name: string, args: ToolArgs
       });
       return JSON.stringify(result, null, 2);
     }
+    case 'export_vue': {
+      const result = exportVue(doc, {
+        id: args['id'] as string | undefined,
+        includeTokens: args['includeTokens'] as boolean | undefined,
+        typescript: args['typescript'] as boolean | undefined,
+      });
+      return JSON.stringify(result, null, 2);
+    }
+    case 'export_svelte': {
+      const result = exportSvelte(doc, {
+        id: args['id'] as string | undefined,
+        includeTokens: args['includeTokens'] as boolean | undefined,
+        typescript: args['typescript'] as boolean | undefined,
+      });
+      return JSON.stringify(result, null, 2);
+    }
+    case 'find_placement':
+      return handleFindPlacement(doc, args);
+    case 'reconcile':
+      return handleReconcile(doc, args);
     default:
       return JSON.stringify({ error: `Unknown utility tool: ${name}` });
   }
@@ -667,4 +751,268 @@ export function jsonSchemaToZodShape(schema: Record<string, unknown>): Record<st
 function truncate(str: string, maxLen: number): string {
   if (str.length <= maxLen) return str;
   return str.slice(0, maxLen - 3) + '...';
+}
+
+// ---------------------------------------------------------------------------
+// find_placement Implementation
+// ---------------------------------------------------------------------------
+
+/**
+ * Analyze existing layout and suggest optimal placement for a new element.
+ *
+ * PRD Section 2.10: find_placement(size?) — Suggest canvas position
+ *
+ * Strategy:
+ * 1. Find the target parent (explicit or page root)
+ * 2. Count existing children to determine insertion index
+ * 3. Analyze parent's layout mode (flex, grid, block) to suggest position
+ * 4. If "near" is specified, suggest placement adjacent to that node
+ */
+function handleFindPlacement(doc: Z10Document, args: ToolArgs): string {
+  const parentId = args['parent'] as string | undefined;
+  const nearId = args['near'] as string | undefined;
+  const positionHint = (args['position'] as string) ?? 'auto';
+  const size = args['size'] as { width?: number; height?: number } | undefined;
+
+  // Find parent node
+  let parent: Z10Node | undefined;
+  if (parentId) {
+    parent = getNode(doc, parentId);
+    if (!parent) {
+      return JSON.stringify({ error: `PARENT_NOT_FOUND: ${parentId}` });
+    }
+  } else if (doc.pages.length > 0) {
+    parent = doc.nodes.get(doc.pages[0]!.rootNodeId);
+  }
+
+  if (!parent) {
+    return JSON.stringify({ error: 'No parent found. Create a page first.' });
+  }
+
+  const children = getChildren(doc, parent.id);
+
+  // Detect parent layout mode from styles
+  const layoutMode = detectLayoutMode(parent);
+
+  // Determine insertion index
+  let insertIndex = children.length; // default: append
+  let nearNode: Z10Node | undefined;
+
+  if (nearId) {
+    nearNode = getNode(doc, nearId);
+    if (nearNode) {
+      const nearIndex = children.findIndex(c => c.id === nearId);
+      if (nearIndex !== -1) {
+        if (positionHint === 'before') {
+          insertIndex = nearIndex;
+        } else if (positionHint === 'after' || positionHint === 'auto') {
+          insertIndex = nearIndex + 1;
+        }
+      }
+    }
+  }
+
+  if (positionHint === 'inside' && nearNode) {
+    // Place inside the near node instead
+    return JSON.stringify({
+      parent: nearId,
+      insertIndex: getChildren(doc, nearId!).length,
+      layout: detectLayoutMode(nearNode),
+      suggestion: `Place inside "${nearId}" as last child`,
+      recommendedStyle: suggestStyle(detectLayoutMode(nearNode), size),
+    });
+  }
+
+  return JSON.stringify({
+    parent: parent.id,
+    insertIndex,
+    siblingCount: children.length,
+    layout: layoutMode,
+    suggestion: buildSuggestion(parent.id, insertIndex, children.length, nearId),
+    recommendedStyle: suggestStyle(layoutMode, size),
+  });
+}
+
+function detectLayoutMode(node: Z10Node): string {
+  const display = node.styles['display'];
+  const flexDir = node.styles['flex-direction'];
+  const gridCols = node.styles['grid-template-columns'];
+
+  if (display === 'grid' || gridCols) return 'grid';
+  if (display === 'flex' || display === 'inline-flex') {
+    return flexDir === 'column' ? 'flex-column' : 'flex-row';
+  }
+  return 'block';
+}
+
+function buildSuggestion(parentId: string, index: number, total: number, nearId?: string): string {
+  if (nearId) {
+    return `Place after "${nearId}" in "${parentId}" at index ${index}`;
+  }
+  if (total === 0) {
+    return `Place as first child of "${parentId}"`;
+  }
+  return `Append to "${parentId}" at index ${index} (${total} existing children)`;
+}
+
+function suggestStyle(layout: string, size?: { width?: number; height?: number }): Record<string, string> {
+  const style: Record<string, string> = {};
+
+  if (size?.width) style['width'] = `${size.width}px`;
+  if (size?.height) style['height'] = `${size.height}px`;
+
+  // Suggest styles that work well with the parent's layout
+  switch (layout) {
+    case 'flex-row':
+      // In a flex row, suggest flex shrink/grow
+      style['flex-shrink'] = '0';
+      break;
+    case 'flex-column':
+      style['width'] = style['width'] ?? '100%';
+      break;
+    case 'grid':
+      // Grid children usually don't need explicit sizing
+      break;
+    case 'block':
+    default:
+      style['width'] = style['width'] ?? '100%';
+      break;
+  }
+
+  return style;
+}
+
+// ---------------------------------------------------------------------------
+// reconcile Implementation
+// ---------------------------------------------------------------------------
+
+/**
+ * Analyze design document consistency and report issues.
+ *
+ * PRD Section 2.10: reconcile(source?) — Trigger sync
+ * PRD Section 3.3: Reconciliation Pipeline (Steps 1-8)
+ *
+ * Current implementation performs document-level analysis:
+ * - Node tree integrity (orphaned nodes, missing parents)
+ * - Component usage validation
+ * - Token coverage analysis
+ * - Intent classification summary
+ *
+ * Full code-to-design reconciliation (PRD Section 3.3) requires
+ * JSX/TSX parsing and is deferred to the visual editor.
+ */
+function handleReconcile(doc: Z10Document, args: ToolArgs): string {
+  const sourceDir = args['source'] as string | undefined;
+
+  // Node integrity analysis
+  const orphanedNodes: string[] = [];
+  const missingParents: Array<{ id: string; parent: string }> = [];
+  const intentCounts: Record<string, number> = {};
+  const editorCounts: Record<string, number> = {};
+
+  for (const node of doc.nodes.values()) {
+    // Check for orphaned nodes (have parent but parent doesn't exist)
+    if (node.parent && !doc.nodes.has(node.parent)) {
+      missingParents.push({ id: node.id, parent: node.parent });
+    }
+
+    // Check for nodes not reachable from any page root
+    if (!node.parent) {
+      const isPageRoot = doc.pages.some(p => p.rootNodeId === node.id);
+      if (!isPageRoot) {
+        orphanedNodes.push(node.id);
+      }
+    }
+
+    // Tally intents
+    const intent = node.intent ?? 'unspecified';
+    intentCounts[intent] = (intentCounts[intent] ?? 0) + 1;
+
+    // Tally editors
+    const editor = node.editor ?? 'unspecified';
+    editorCounts[editor] = (editorCounts[editor] ?? 0) + 1;
+  }
+
+  // Component usage analysis
+  const componentUsage: Record<string, number> = {};
+  const unknownComponents: Array<{ id: string; component: string }> = [];
+
+  for (const node of doc.nodes.values()) {
+    if (node.componentName) {
+      componentUsage[node.componentName] = (componentUsage[node.componentName] ?? 0) + 1;
+      if (!doc.components.has(node.componentName)) {
+        unknownComponents.push({ id: node.id, component: node.componentName });
+      }
+    }
+  }
+
+  // Unused components (defined but never instantiated)
+  const unusedComponents: string[] = [];
+  for (const name of doc.components.keys()) {
+    if (!componentUsage[name]) {
+      unusedComponents.push(name);
+    }
+  }
+
+  // Token coverage
+  const tokenRefs = new Set<string>();
+  for (const node of doc.nodes.values()) {
+    for (const value of Object.values(node.styles)) {
+      const matches = value.match(/var\(--[^)]+\)/g);
+      if (matches) {
+        for (const m of matches) {
+          tokenRefs.add(m.slice(4, -1)); // extract --token-name
+        }
+      }
+    }
+  }
+
+  const definedTokens = new Set<string>();
+  for (const t of doc.tokens.primitives.values()) definedTokens.add(t.name);
+  for (const t of doc.tokens.semantic.values()) definedTokens.add(t.name);
+
+  const undefinedTokenRefs = [...tokenRefs].filter(t => !definedTokens.has(t));
+  const unusedTokens = [...definedTokens].filter(t => !tokenRefs.has(t));
+
+  const issues: string[] = [];
+  if (missingParents.length > 0) issues.push(`${missingParents.length} nodes reference missing parents`);
+  if (orphanedNodes.length > 0) issues.push(`${orphanedNodes.length} orphaned root nodes`);
+  if (unknownComponents.length > 0) issues.push(`${unknownComponents.length} nodes reference undefined components`);
+  if (undefinedTokenRefs.length > 0) issues.push(`${undefinedTokenRefs.length} undefined token references`);
+
+  const result = {
+    status: issues.length === 0 ? 'healthy' : 'issues_found',
+    summary: {
+      totalNodes: doc.nodes.size,
+      totalComponents: doc.components.size,
+      totalPages: doc.pages.length,
+      totalTokens: definedTokens.size,
+    },
+    integrity: {
+      orphanedNodes,
+      missingParents,
+    },
+    components: {
+      usage: componentUsage,
+      unknownReferences: unknownComponents,
+      unusedDefinitions: unusedComponents,
+    },
+    tokens: {
+      undefinedReferences: undefinedTokenRefs,
+      unusedDefinitions: unusedTokens,
+    },
+    classification: {
+      byIntent: intentCounts,
+      byEditor: editorCounts,
+    },
+    issues,
+    ...(sourceDir ? {
+      reconciliation: {
+        sourceDir,
+        note: 'Full code-to-design reconciliation (PRD Section 3.3) requires the visual editor. This analysis covers document-level consistency only.',
+      },
+    } : {}),
+  };
+
+  return JSON.stringify(result, null, 2);
 }

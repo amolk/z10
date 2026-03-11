@@ -24,6 +24,8 @@ import { parseZ10Html } from '../format/parser.js';
 import { cmdBranch, cmdDiff, cmdMerge, cmdSync } from './git.js';
 import { getConfigValue, setConfigValue, CONFIG_KEYS } from '../core/config.js';
 import { exportReact } from '../export/react.js';
+import { exportVue } from '../export/vue.js';
+import { exportSvelte } from '../export/svelte.js';
 import type { ProjectConfig } from '../core/types.js';
 
 const args = process.argv.slice(2);
@@ -203,7 +205,7 @@ async function cmdConfig(): Promise<void> {
 async function cmdExport(): Promise<void> {
   const filePath = args[1];
   if (!filePath) {
-    console.error('Usage: z10 export <file.z10.html> [--id <nodeId>] [--out <output.tsx>] [--js]');
+    console.error('Usage: z10 export <file.z10.html> [--format react|vue] [--id <nodeId>] [--out <output>] [--js]');
     process.exit(1);
   }
 
@@ -213,8 +215,21 @@ async function cmdExport(): Promise<void> {
   const idFlag = args.indexOf('--id');
   const id = idFlag !== -1 ? args[idFlag + 1] : undefined;
   const useJs = args.includes('--js');
+  const formatFlag = args.indexOf('--format');
+  const format = formatFlag !== -1 ? args[formatFlag + 1] : 'react';
 
-  const result = exportReact(doc, { id, typescript: !useJs, includeTokens: true });
+  let result: { code: string; components: string[]; tokensCss?: string };
+
+  if (format === 'vue') {
+    result = exportVue(doc, { id, typescript: !useJs, includeTokens: true });
+  } else if (format === 'svelte') {
+    result = exportSvelte(doc, { id, typescript: !useJs, includeTokens: true });
+  } else if (format === 'react') {
+    result = exportReact(doc, { id, typescript: !useJs, includeTokens: true });
+  } else {
+    console.error(`Unknown format: ${format}. Supported: react, vue, svelte`);
+    process.exit(1);
+  }
 
   const outFlag = args.indexOf('--out');
   if (outFlag !== -1 && args[outFlag + 1]) {
@@ -244,7 +259,7 @@ Usage:
   z10 serve [file]           Start the MCP server (default port 29910)
   z10 new [name]             Create a new .z10.html file
   z10 info <file>            Show document summary
-  z10 export <file> [--id <id>] [--out <file>] [--js]  Export to React + Tailwind
+  z10 export <file> [--format react|vue|svelte] [--id <id>] [--out <file>] [--js]  Export code
   z10 config <file> [key] [value]  Get/set project configuration
   z10 branch [name]          Create/list design branches (z10/ prefixed)
   z10 diff <ref1>..<ref2>    Semantic diff of .z10.html between Git refs
