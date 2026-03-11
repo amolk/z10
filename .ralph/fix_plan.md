@@ -7,7 +7,7 @@
 - [x] Implement CLI tool (z10 branch, z10 diff, z10 sync)
 - [x] Add Z10 runtime (template instantiation, faker data, mode switching)
 - [x] Add configuration management
-- [ ] Create user documentation
+- [x] Create user documentation
 
 ## Low Priority
 - [ ] Performance optimization
@@ -32,6 +32,7 @@
 - [x] Implement CLI Git commands (z10 branch, z10 diff, z10 merge, z10 sync) with semantic node-level diffing
 - [x] Add Z10 runtime (faker, template instantiation, mode switching) — 66 tests
 - [x] Add configuration management (validation, CLI get/set, config file support) — 24 tests
+- [x] Create user documentation (comprehensive README with CLI, MCP, format, runtime docs)
 
 ## Notes
 - Focus on MVP functionality first
