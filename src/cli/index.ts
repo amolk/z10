@@ -11,6 +11,7 @@
  *   z10 diff <ref1>..<ref2>    Semantic diff of .z10.html files
  *   z10 merge <branch>         Merge a design branch
  *   z10 sync --design <file>   Check design file sync status
+ *   z10 config <file> [key] [value]  Get/set config values
  */
 
 import { readFile, writeFile } from 'node:fs/promises';
@@ -20,6 +21,8 @@ import { createDocument, addNode, createNode, addPage, setTokens } from '../core
 import { serializeZ10Html } from '../format/serializer.js';
 import { parseZ10Html } from '../format/parser.js';
 import { cmdBranch, cmdDiff, cmdMerge, cmdSync } from './git.js';
+import { getConfigValue, setConfigValue, CONFIG_KEYS } from '../core/config.js';
+import type { ProjectConfig } from '../core/types.js';
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -46,6 +49,9 @@ async function main(): Promise<void> {
       break;
     case 'sync':
       await cmdSync(args.slice(1));
+      break;
+    case 'config':
+      await cmdConfig();
       break;
     case '--help':
     case '-h':
@@ -136,6 +142,59 @@ async function cmdInfo(): Promise<void> {
   console.log(`Tokens: ${doc.tokens.primitives.size} primitives, ${doc.tokens.semantic.size} semantic`);
 }
 
+async function cmdConfig(): Promise<void> {
+  const filePath = args[1];
+  if (!filePath) {
+    console.error('Usage: z10 config <file.z10.html> [key] [value]');
+    console.error('\nAvailable keys:');
+    for (const entry of CONFIG_KEYS) {
+      const valid = entry.validValues ? ` (${entry.validValues})` : '';
+      console.error(`  ${entry.key} — ${entry.description}${valid}`);
+    }
+    process.exit(1);
+  }
+
+  const absPath = resolve(filePath);
+  const html = await readFile(absPath, 'utf-8');
+  const doc = parseZ10Html(html);
+  const key = args[2] as keyof ProjectConfig | undefined;
+
+  // z10 config <file> — show all config
+  if (!key) {
+    for (const entry of CONFIG_KEYS) {
+      console.log(`${entry.key}=${getConfigValue(doc, entry.key)}`);
+    }
+    return;
+  }
+
+  // Validate key
+  if (!CONFIG_KEYS.some(e => e.key === key)) {
+    console.error(`Unknown config key: ${key}`);
+    console.error(`Valid keys: ${CONFIG_KEYS.map(e => e.key).join(', ')}`);
+    process.exit(1);
+  }
+
+  const value = args[3];
+
+  // z10 config <file> <key> — get single value
+  if (value === undefined) {
+    console.log(getConfigValue(doc, key));
+    return;
+  }
+
+  // z10 config <file> <key> <value> — set value
+  const err = setConfigValue(doc, key, value);
+  if (err) {
+    console.error(`Error: ${err}`);
+    process.exit(1);
+  }
+
+  // Save the updated document
+  const updatedHtml = serializeZ10Html(doc);
+  await writeFile(absPath, updatedHtml, 'utf-8');
+  console.log(`${key}=${value}`);
+}
+
 function printHelp(): void {
   console.log(`
 Zero-10 CLI — Branchable UI evolution for the agent era
@@ -144,6 +203,7 @@ Usage:
   z10 serve [file]           Start the MCP server (default port 29910)
   z10 new [name]             Create a new .z10.html file
   z10 info <file>            Show document summary
+  z10 config <file> [key] [value]  Get/set project configuration
   z10 branch [name]          Create/list design branches (z10/ prefixed)
   z10 diff <ref1>..<ref2>    Semantic diff of .z10.html between Git refs
   z10 merge <branch> [--into <target>]  Merge a design branch
@@ -158,6 +218,9 @@ Examples:
   z10 new "My App"                         Create my-app.z10.html
   z10 serve my-app.z10.html                Start server with file
   z10 info my-app.z10.html                 Show document info
+  z10 config app.z10.html                  Show all config values
+  z10 config app.z10.html governance       Get governance level
+  z10 config app.z10.html governance scoped-edit  Set governance
   z10 branch "dark-mode-exploration"       Create a design branch
   z10 diff main..z10/dark-mode-exploration Semantic diff between branches
   z10 merge dark-mode-exploration --into main

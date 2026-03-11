@@ -6,7 +6,7 @@
 ## Medium Priority
 - [x] Implement CLI tool (z10 branch, z10 diff, z10 sync)
 - [x] Add Z10 runtime (template instantiation, faker data, mode switching)
-- [ ] Add configuration management
+- [x] Add configuration management
 - [ ] Create user documentation
 
 ## Low Priority
@@ -30,6 +30,8 @@
 - [x] MCP HTTP server with Streamable HTTP transport on port 29910
 - [x] Implement CLI tool entry point (z10 serve, z10 new, z10 info)
 - [x] Implement CLI Git commands (z10 branch, z10 diff, z10 merge, z10 sync) with semantic node-level diffing
+- [x] Add Z10 runtime (faker, template instantiation, mode switching) — 66 tests
+- [x] Add configuration management (validation, CLI get/set, config file support) — 24 tests
 
 ## Notes
 - Focus on MVP functionality first
