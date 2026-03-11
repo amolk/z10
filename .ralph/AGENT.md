@@ -2,48 +2,55 @@
 
 ## Project Setup
 ```bash
-# Install dependencies (example for Node.js project)
 npm install
-
-# Or for Python project
-pip install -r requirements.txt
-
-# Or for Rust project  
-cargo build
 ```
 
 ## Running Tests
 ```bash
-# Node.js
-npm test
-
-# Python
-pytest
-
-# Rust
-cargo test
+npm test              # run all tests
+npm run test:watch    # run tests in watch mode
+npm run test:coverage # run with coverage report
 ```
 
 ## Build Commands
 ```bash
-# Production build
-npm run build
-# or
-cargo build --release
+npm run build   # compile TypeScript to dist/
+npm run lint    # type-check without emitting
+npm run clean   # remove dist/
 ```
 
-## Development Server
-```bash
-# Start development server
-npm run dev
-# or
-cargo run
+## Architecture
+
+Zero-10 is a design tool built on annotated web standards. The `.z10.html` file format uses `data-z10-*` attributes and `<script type="application/z10+json">` metadata over standard HTML/CSS.
+
+### Source Structure
 ```
+src/
+├── core/
+│   ├── types.ts      # All TypeScript types (Z10Document, Z10Node, Z10Command, etc.)
+│   ├── document.ts   # Document model: create, add, remove, move, query nodes
+│   ├── commands.ts   # Command executor: processes the 12 z10 primitives
+│   └── index.ts      # Barrel export
+└── index.ts          # Package entry point
+```
+
+### Core Concepts
+- **Z10Document**: In-memory representation of a .z10.html file (nodes, tokens, components, pages)
+- **Z10Node**: A node in the document tree (has id, tag, styles, children, parent)
+- **Z10Command**: One of 12 command types (node, text, instance, repeat, style, move, remove, component, tokens, batch, attr, write_html)
+- **CommandResult**: Success or error with deterministic error codes (NODE_EXISTS, NODE_NOT_FOUND, PARENT_NOT_FOUND, COMPONENT_NOT_FOUND, GOVERNANCE_DENIED)
+- **Governance**: Three levels — full-edit, propose-approve, scoped-edit
+
+### Technology
+- TypeScript 5.7+ with strict mode
+- ES2022 modules (NodeNext resolution)
+- Vitest for testing
+- No runtime dependencies (zero deps)
 
 ## Key Learnings
-- Update this section when you learn new build optimizations
-- Document any gotchas or special setup requirements
-- Keep track of the fastest test/build cycle
+- tsconfig uses NodeNext module resolution (linter auto-corrected from ES2022/bundler)
+- All imports use .js extension (required for NodeNext)
+- Tests run in ~190ms for 49 tests — very fast feedback loop
 
 ## Feature Development Quality Standards
 
