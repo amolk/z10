@@ -20,6 +20,8 @@ import type {
   NodeId,
 } from './types.js';
 
+import { resolveFakerProps } from '../runtime/faker.js';
+
 import {
   createNode,
   addNode,
@@ -169,17 +171,10 @@ function execRepeat(doc: Z10Document, cmd: RepeatCommand): CommandResult {
     const instanceId = `${cmd.id}_${i}`;
     if (doc.nodes.has(instanceId)) continue;
 
-    // Resolve faker props to static values (simplified — real impl would use faker library)
-    const resolvedProps: Record<string, string | number | boolean> = {};
-    if (cmd.props) {
-      for (const [key, val] of Object.entries(cmd.props)) {
-        if (typeof val === 'object' && val !== null && 'faker' in val) {
-          resolvedProps[key] = `${val.faker}_${i}`;  // Placeholder faker resolution
-        } else {
-          resolvedProps[key] = val as string | number | boolean;
-        }
-      }
-    }
+    // Resolve faker props using the seeded faker module
+    const resolvedProps = cmd.props
+      ? resolveFakerProps(cmd.props, cmd.id, i)
+      : {};
 
     const node = createNode({
       id: instanceId,

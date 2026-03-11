@@ -5,7 +5,7 @@
 
 ## Medium Priority
 - [x] Implement CLI tool (z10 branch, z10 diff, z10 sync)
-- [ ] Add Z10 runtime (template instantiation, faker data, mode switching)
+- [x] Add Z10 runtime (template instantiation, faker data, mode switching)
 - [ ] Add configuration management
 - [ ] Create user documentation
 
