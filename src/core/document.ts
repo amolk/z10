@@ -144,7 +144,8 @@ export function removeNode(doc: Z10Document, id: NodeId): Z10Node | undefined {
   if (node.parent) {
     const parent = doc.nodes.get(node.parent);
     if (parent) {
-      parent.children = parent.children.filter(cid => cid !== id);
+      const idx = parent.children.indexOf(id);
+      if (idx !== -1) parent.children.splice(idx, 1);
     }
   }
 
@@ -162,7 +163,8 @@ export function moveNode(doc: Z10Document, id: NodeId, newParent: NodeId, index?
   if (node.parent) {
     const oldParent = doc.nodes.get(node.parent);
     if (oldParent) {
-      oldParent.children = oldParent.children.filter(cid => cid !== id);
+      const idx = oldParent.children.indexOf(id);
+      if (idx !== -1) oldParent.children.splice(idx, 1);
     }
   }
 

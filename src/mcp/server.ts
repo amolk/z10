@@ -21,6 +21,7 @@ import {
   handleReadTool,
   handleWriteTool,
   type ToolArgs,
+  jsonSchemaToZodShape,
 } from './tools.js';
 
 // ---------------------------------------------------------------------------
@@ -82,10 +83,11 @@ export function createMcpServer(): McpServer {
 
   // Register read tools
   for (const tool of READ_TOOLS) {
+    const zodShape = jsonSchemaToZodShape(tool.inputSchema);
     server.tool(
       tool.name,
       tool.description,
-      tool.inputSchema as Record<string, unknown>,
+      zodShape,
       async (args: ToolArgs) => {
         const result = handleReadTool(currentDoc, tool.name, args);
         return { content: [{ type: 'text' as const, text: result }] };
@@ -95,10 +97,11 @@ export function createMcpServer(): McpServer {
 
   // Register write tools
   for (const tool of WRITE_TOOLS) {
+    const zodShape = jsonSchemaToZodShape(tool.inputSchema);
     server.tool(
       tool.name,
       tool.description,
-      tool.inputSchema as Record<string, unknown>,
+      zodShape,
       async (args: ToolArgs) => {
         const result = handleWriteTool(currentDoc, tool.name, args);
 

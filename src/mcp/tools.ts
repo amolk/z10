@@ -3,6 +3,7 @@
  * Implements the read and write tools from PRD Section 2.10.
  */
 
+import { z, type ZodRawShape } from 'zod';
 import type {
   Z10Document,
   Z10Command,
@@ -577,6 +578,53 @@ function writeToolToCommand(name: string, args: ToolArgs): Z10Command | null {
     default:
       return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// JSON Schema → Zod Conversion
+// ---------------------------------------------------------------------------
+
+/**
+ * Convert a JSON Schema inputSchema to a Zod raw shape for McpServer.tool().
+ * The MCP SDK expects Zod schemas, not raw JSON Schema objects.
+ */
+export function jsonSchemaToZodShape(schema: Record<string, unknown>): Record<string, z.ZodTypeAny> {
+  const properties = (schema['properties'] ?? {}) as Record<string, Record<string, unknown>>;
+  const required = (schema['required'] ?? []) as string[];
+  const shape: Record<string, z.ZodTypeAny> = {};
+
+  for (const [key, propSchema] of Object.entries(properties)) {
+    const isRequired = required.includes(key);
+    let zodType: z.ZodTypeAny;
+
+    if (propSchema['enum']) {
+      const values = propSchema['enum'] as [string, ...string[]];
+      zodType = z.enum(values);
+    } else {
+      switch (propSchema['type']) {
+        case 'number':
+          zodType = z.number();
+          break;
+        case 'boolean':
+          zodType = z.boolean();
+          break;
+        case 'array':
+          zodType = z.array(z.any());
+          break;
+        case 'object':
+          zodType = z.record(z.string(), z.any());
+          break;
+        case 'string':
+        default:
+          zodType = z.string();
+          break;
+      }
+    }
+
+    shape[key] = isRequired ? zodType : zodType.optional();
+  }
+
+  return shape;
 }
 
 // ---------------------------------------------------------------------------

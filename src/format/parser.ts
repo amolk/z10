@@ -125,7 +125,23 @@ function parseTokenCss(css: string, collection: TokenCollection, doc: Z10Documen
 // ---------------------------------------------------------------------------
 
 function extractComponents(html: string, doc: Z10Document): void {
-  // Extract component JSON blocks
+  // Pre-index all component styles and templates in a single pass
+  const stylesIndex = new Map<string, string>();
+  const templateIndex = new Map<string, string>();
+
+  const stylesRe = /<style\s+data-z10-component-styles="([^"]*)"\s*>([\s\S]*?)<\/style>/g;
+  let sm: RegExpExecArray | null;
+  while ((sm = stylesRe.exec(html)) !== null) {
+    stylesIndex.set(sm[1]!, sm[2]!.trim());
+  }
+
+  const templateRe = /<template\s+data-z10-template="([^"]*)"\s*>([\s\S]*?)<\/template>/g;
+  let tm: RegExpExecArray | null;
+  while ((tm = templateRe.exec(html)) !== null) {
+    templateIndex.set(tm[1]!, tm[2]!.trim());
+  }
+
+  // Extract component JSON blocks and look up styles/templates from index
   const componentRe =
     /<script\s+type="application\/z10\+json"\s+data-z10-role="component"\s*>([\s\S]*?)<\/script>/g;
   let match: RegExpExecArray | null;
@@ -135,18 +151,14 @@ function extractComponents(html: string, doc: Z10Document): void {
       const name = typeof raw['name'] === 'string' ? raw['name'] : '';
       if (!name) continue;
 
-      // Find associated styles and template
-      const styles = extractComponentStyles(html, name);
-      const template = extractComponentTemplate(html, name);
-
       const schema: ComponentSchema = {
         name,
         description: typeof raw['description'] === 'string' ? raw['description'] : undefined,
         props: parseComponentProps(raw['props']),
         variants: parseComponentVariants(raw['variants']),
         slots: Array.isArray(raw['slots']) ? raw['slots'] as string[] : undefined,
-        styles,
-        template,
+        styles: stylesIndex.get(name) ?? '',
+        template: templateIndex.get(name) ?? '',
       };
 
       doc.components.set(name, schema);
@@ -154,22 +166,6 @@ function extractComponents(html: string, doc: Z10Document): void {
       // Skip malformed component blocks
     }
   }
-}
-
-function extractComponentStyles(html: string, name: string): string {
-  const re = new RegExp(
-    `<style\\s+data-z10-component-styles="${escapeRegex(name)}"\\s*>([\\s\\S]*?)</style>`,
-  );
-  const match = html.match(re);
-  return match?.[1]?.trim() ?? '';
-}
-
-function extractComponentTemplate(html: string, name: string): string {
-  const re = new RegExp(
-    `<template\\s+data-z10-template="${escapeRegex(name)}"\\s*>([\\s\\S]*?)</template>`,
-  );
-  const match = html.match(re);
-  return match?.[1]?.trim() ?? '';
 }
 
 function parseComponentProps(raw: unknown): ComponentProp[] {
@@ -280,8 +276,15 @@ function parseChildNodes(html: string, parentId: NodeId, doc: Z10Document): void
 // HTML Attribute Helpers
 // ---------------------------------------------------------------------------
 
+/** Cache compiled RegExp objects per attribute name to avoid re-creation on every call */
+const _attrRegexCache = new Map<string, RegExp>();
+
 function extractAttrValue(attrStr: string, name: string): string | undefined {
-  const re = new RegExp(`${escapeRegex(name)}="([^"]*)"`, 'i');
+  let re = _attrRegexCache.get(name);
+  if (!re) {
+    re = new RegExp(`${escapeRegex(name)}="([^"]*)"`, 'i');
+    _attrRegexCache.set(name, re);
+  }
   const match = attrStr.match(re);
   return match?.[1];
 }
@@ -297,9 +300,10 @@ function extractDataAttributes(attrStr: string): Record<string, string> {
 }
 
 function getTextContent(html: string): string {
+  // Fast path: if no tags present, skip regex
+  if (!html.includes('<')) return html.trim();
   // Strip all HTML tags to get plain text
-  const text = html.replace(/<[^>]+>/g, '').trim();
-  return text;
+  return html.replace(/<[^>]+>/g, '').trim();
 }
 
 function hasChildElements(html: string): boolean {
