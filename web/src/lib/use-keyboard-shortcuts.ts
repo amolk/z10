@@ -36,6 +36,7 @@ export function useKeyboardShortcuts() {
     transformRef,
     updateElementStyle,
     content,
+    groupIntoFrame,
   } = useEditor();
 
   // Get all selectable element IDs on the active page
@@ -179,37 +180,10 @@ export function useKeyboardShortcuts() {
         return;
       }
 
-      // ─── Cmd+G → group ───────────────────────────────────
-      if (cmd && !e.shiftKey && e.key === "g" && selectedIds.size > 1) {
+      // ─── Cmd+G → group into frame ─────────────────────────
+      if (cmd && !e.shiftKey && e.key === "g" && selectedIds.size >= 1) {
         e.preventDefault();
-        const container = transformRef.current;
-        if (!container) return;
-
-        const groupId = `group_${Date.now().toString(36)}`;
-        const wrapper = document.createElement("div");
-        wrapper.setAttribute("data-z10-id", groupId);
-        wrapper.setAttribute("data-z10-node", "Group");
-        wrapper.style.position = "relative";
-
-        const elements: HTMLElement[] = [];
-        for (const id of selectedIds) {
-          const el = container.querySelector(
-            `[data-z10-id="${id}"]`
-          ) as HTMLElement | null;
-          if (el) elements.push(el);
-        }
-
-        if (elements.length > 1) {
-          const parent = elements[0].parentElement;
-          if (parent) {
-            parent.insertBefore(wrapper, elements[0]);
-            for (const el of elements) {
-              wrapper.appendChild(el);
-            }
-            clearSelection();
-            select(groupId, false);
-          }
-        }
+        groupIntoFrame();
         return;
       }
 
@@ -272,5 +246,6 @@ export function useKeyboardShortcuts() {
     activePageId,
     updateElementStyle,
     content,
+    groupIntoFrame,
   ]);
 }

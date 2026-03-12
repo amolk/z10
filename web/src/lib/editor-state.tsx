@@ -101,6 +101,25 @@ export type EditorState = {
   // Active page
   activePageId: string | null;
   setActivePageId: (id: string) => void;
+
+  // Panel visibility
+  leftPanelVisible: boolean;
+  rightPanelVisible: boolean;
+  setLeftPanelVisible: (v: boolean) => void;
+  setRightPanelVisible: (v: boolean) => void;
+
+  // Dark mode
+  isDarkMode: boolean;
+  toggleDarkMode: () => void;
+
+  // Group selected elements into a frame
+  groupIntoFrame: () => void;
+
+  // Page operations
+  addPage: () => void;
+  deletePage: (pageId: string) => void;
+  duplicatePage: (pageId: string) => void;
+  reorderPages: (fromIndex: number, toIndex: number) => void;
 };
 
 // ─── Context ────────────────────────────────────────────────
@@ -132,13 +151,57 @@ export function EditorProvider({
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [content, setContent] = useState(initialContent);
   const [activeTool, setActiveTool] = useState<ToolType>("select");
-  const [activePageId, setActivePageId] = useState<string | null>(null);
+  const [activePageId, setActivePageIdRaw] = useState<string | null>(null);
+  const setActivePageId = useCallback((id: string) => {
+    setActivePageIdRaw(id);
+    setSelectedIds(new Set());
+  }, []);
+  const [leftPanelVisible, setLeftPanelVisibleRaw] = useState(false);
+  const [rightPanelVisible, setRightPanelVisibleRaw] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(false);
+
+  // Hydrate panel visibility from localStorage on mount
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const left = localStorage.getItem("z10-left-panel");
+    const right = localStorage.getItem("z10-right-panel");
+    if (left !== null) setLeftPanelVisibleRaw(left === "true");
+    if (right !== null) setRightPanelVisibleRaw(right === "true");
+  }, []);
+
+  const setLeftPanelVisible = useCallback((v: boolean) => {
+    setLeftPanelVisibleRaw(v);
+    if (typeof window !== "undefined") localStorage.setItem("z10-left-panel", String(v));
+  }, []);
+
+  const setRightPanelVisible = useCallback((v: boolean) => {
+    setRightPanelVisibleRaw(v);
+    if (typeof window !== "undefined") localStorage.setItem("z10-right-panel", String(v));
+  }, []);
+
+  const toggleDarkMode = useCallback(() => {
+    setIsDarkMode((prev) => {
+      const next = !prev;
+      if (typeof document !== "undefined") {
+        document.documentElement.classList.toggle("dark", next);
+      }
+      return next;
+    });
+  }, []);
+
+  // Sync dark mode class on mount
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      const hasDark = document.documentElement.classList.contains("dark");
+      setIsDarkMode(hasDark);
+    }
+  }, []);
 
   // Hydrate layers + activePageId on mount (client-only)
   useEffect(() => {
     const parsed = parseLayerTree(initialContent);
     setLayers(parsed);
-    setActivePageId(parsed[0]?.id ?? null);
+    setActivePageIdRaw(parsed[0]?.id ?? null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const transformRef = useRef<HTMLDivElement>(null);
@@ -153,7 +216,17 @@ export function EditorProvider({
       }
       return new Set([id]);
     });
-  }, []);
+    // Auto-expand ancestors so the selected node is visible in the layers tree
+    setCollapsedIds((prev) => {
+      const ancestors = findAncestorIds(layers, id);
+      if (ancestors.length === 0) return prev;
+      const hasCollapsed = ancestors.some((a) => prev.has(a));
+      if (!hasCollapsed) return prev;
+      const next = new Set(prev);
+      for (const a of ancestors) next.delete(a);
+      return next;
+    });
+  }, [layers]);
 
   const clearSelection = useCallback(() => {
     setSelectedIds(new Set());
@@ -206,6 +279,62 @@ export function EditorProvider({
     });
   }, []);
 
+  const groupIntoFrame = useCallback(() => {
+    if (selectedIds.size < 1) return;
+    setContent((prev) => {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(prev, "text/html");
+      const elements: HTMLElement[] = [];
+      for (const id of selectedIds) {
+        const el = doc.querySelector(`[data-z10-id="${id}"]`) as HTMLElement | null;
+        if (el) elements.push(el);
+      }
+      if (elements.length === 0) return prev;
+
+      // Compute bounding box from inline styles
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const el of elements) {
+        const left = parseFloat(el.style.left) || 0;
+        const top = parseFloat(el.style.top) || 0;
+        const width = parseFloat(el.style.width) || 100;
+        const height = parseFloat(el.style.height) || 50;
+        minX = Math.min(minX, left);
+        minY = Math.min(minY, top);
+        maxX = Math.max(maxX, left + width);
+        maxY = Math.max(maxY, top + height);
+      }
+
+      // Create frame wrapper
+      const frameId = `frame_${Date.now()}`;
+      const frame = doc.createElement("div");
+      frame.setAttribute("data-z10-id", frameId);
+      frame.setAttribute("data-z10-node", "Frame");
+      const padding = 16;
+      frame.setAttribute("style", `position: absolute; left: ${Math.round(minX - padding)}px; top: ${Math.round(minY - padding)}px; width: ${Math.round(maxX - minX + padding * 2)}px; height: ${Math.round(maxY - minY + padding * 2)}px; border-radius: 8px;`);
+
+      // Insert frame before first element, move all into it
+      const parent = elements[0].parentElement;
+      if (!parent) return prev;
+      parent.insertBefore(frame, elements[0]);
+      for (const el of elements) {
+        // Adjust positions relative to frame
+        const left = parseFloat(el.style.left) || 0;
+        const top = parseFloat(el.style.top) || 0;
+        el.style.left = `${Math.round(left - minX + padding)}px`;
+        el.style.top = `${Math.round(top - minY + padding)}px`;
+        frame.appendChild(el);
+      }
+
+      const result = `<html${doc.documentElement.getAttribute("data-z10-project") ? ` data-z10-project="${doc.documentElement.getAttribute("data-z10-project")}"` : ""}>\n${doc.documentElement.innerHTML}\n</html>`;
+      // Schedule layer re-parse
+      setTimeout(() => {
+        setLayers(parseLayerTree(result));
+        setSelectedIds(new Set([frameId]));
+      }, 0);
+      return result;
+    });
+  }, [selectedIds]);
+
   const updateContent = useCallback((newContent: string) => {
     isExternalUpdate.current = true;
     setContent(newContent);
@@ -213,6 +342,116 @@ export function EditorProvider({
     // Clear selection — element IDs may have changed
     setSelectedIds(new Set());
   }, []);
+
+  const addPage = useCallback(() => {
+    const prev = content || initialContent;
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(prev || "<html><head></head><body></body></html>", "text/html");
+
+    // Determine page number from existing pages
+    const existingPages = doc.querySelectorAll("[data-z10-page]");
+    const pageNum = existingPages.length + 1;
+    const pageName = `Page ${pageNum}`;
+    const pageId = `page_${Date.now()}`;
+
+    // Create page element (the canvas)
+    const pageEl = doc.createElement("div");
+    pageEl.setAttribute("data-z10-page", pageName);
+    pageEl.setAttribute("data-z10-id", pageId);
+    pageEl.setAttribute("style", "position: relative;");
+
+    // Add a default frame inside the page
+    const frameId = `frame_${pageId}`;
+    const frameEl = doc.createElement("div");
+    frameEl.setAttribute("data-z10-id", frameId);
+    frameEl.setAttribute("data-z10-node", "Frame");
+    frameEl.setAttribute(
+      "style",
+      "position: absolute; left: 0px; top: 0px; width: 1440px; height: 900px; background-color: #ffffff; overflow: hidden;"
+    );
+    pageEl.appendChild(frameEl);
+
+    doc.body.appendChild(pageEl);
+
+    const result = `<html${doc.documentElement.getAttribute("data-z10-project") ? ` data-z10-project="${doc.documentElement.getAttribute("data-z10-project")}"` : ""}>\n${doc.documentElement.innerHTML}\n</html>`;
+
+    // Update all state synchronously so activePageId and content are consistent
+    const parsed = parseLayerTree(result);
+    setLayers(parsed);
+    setContent(result);
+    setActivePageIdRaw(pageId);
+    setSelectedIds(new Set());
+  }, [content, initialContent]);
+
+  const deletePage = useCallback((pageId: string) => {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(content || initialContent, "text/html");
+    const allPages = doc.querySelectorAll("[data-z10-page]");
+    if (allPages.length <= 1) return; // Don't delete the last page
+
+    const target = doc.querySelector(`[data-z10-id="${pageId}"]`);
+    if (!target) return;
+    target.parentElement?.removeChild(target);
+
+    const result = `<html${doc.documentElement.getAttribute("data-z10-project") ? ` data-z10-project="${doc.documentElement.getAttribute("data-z10-project")}"` : ""}>\n${doc.documentElement.innerHTML}\n</html>`;
+    const parsed = parseLayerTree(result);
+    setLayers(parsed);
+    setContent(result);
+    // Switch to the first remaining page if we deleted the active one
+    if (activePageId === pageId) {
+      setActivePageIdRaw(parsed[0]?.id ?? null);
+    }
+    setSelectedIds(new Set());
+  }, [content, initialContent, activePageId]);
+
+  const duplicatePage = useCallback((pageId: string) => {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(content || initialContent, "text/html");
+    const source = doc.querySelector(`[data-z10-id="${pageId}"]`);
+    if (!source) return;
+
+    const clone = source.cloneNode(true) as HTMLElement;
+    const newPageId = `page_${Date.now()}`;
+    clone.setAttribute("data-z10-id", newPageId);
+    const origName = clone.getAttribute("data-z10-page") || "Page";
+    clone.setAttribute("data-z10-page", `${origName} Copy`);
+    // Reassign all child data-z10-id to prevent duplicates
+    clone.querySelectorAll("[data-z10-id]").forEach((el) => {
+      el.setAttribute("data-z10-id", `${el.getAttribute("data-z10-id")}_dup_${Date.now().toString(36)}`);
+    });
+    source.parentElement?.insertBefore(clone, source.nextSibling);
+
+    const result = `<html${doc.documentElement.getAttribute("data-z10-project") ? ` data-z10-project="${doc.documentElement.getAttribute("data-z10-project")}"` : ""}>\n${doc.documentElement.innerHTML}\n</html>`;
+    const parsed = parseLayerTree(result);
+    setLayers(parsed);
+    setContent(result);
+    setActivePageIdRaw(newPageId);
+    setSelectedIds(new Set());
+  }, [content, initialContent]);
+
+  const reorderPages = useCallback((fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(content || initialContent, "text/html");
+    const pageEls = Array.from(doc.querySelectorAll("[data-z10-page]"));
+    if (fromIndex < 0 || fromIndex >= pageEls.length || toIndex < 0 || toIndex >= pageEls.length) return;
+
+    const movedEl = pageEls[fromIndex];
+    movedEl.parentElement?.removeChild(movedEl);
+
+    // Re-query after removal
+    const remaining = Array.from(doc.querySelectorAll("[data-z10-page]"));
+    if (toIndex >= remaining.length) {
+      doc.body.appendChild(movedEl);
+    } else {
+      remaining[toIndex].parentElement?.insertBefore(movedEl, remaining[toIndex]);
+    }
+
+    const result = `<html${doc.documentElement.getAttribute("data-z10-project") ? ` data-z10-project="${doc.documentElement.getAttribute("data-z10-project")}"` : ""}>\n${doc.documentElement.innerHTML}\n</html>`;
+    const parsed = parseLayerTree(result);
+    setLayers(parsed);
+    setContent(result);
+  }, [content, initialContent]);
 
   return (
     <EditorContext.Provider
@@ -236,6 +475,17 @@ export function EditorProvider({
         isExternalUpdate,
         activePageId,
         setActivePageId,
+        leftPanelVisible,
+        rightPanelVisible,
+        setLeftPanelVisible,
+        setRightPanelVisible,
+        isDarkMode,
+        toggleDarkMode,
+        groupIntoFrame,
+        addPage,
+        deletePage,
+        duplicatePage,
+        reorderPages,
       }}
     >
       {children}
@@ -468,4 +718,22 @@ function elementToNode(el: HTMLElement, depth: number): LayerNode {
   }
 
   return { id, name, tag: el.tagName.toLowerCase(), type, children, depth };
+}
+
+/** Find all ancestor node IDs for a given node ID in the layer tree */
+function findAncestorIds(roots: LayerNode[], targetId: string): string[] {
+  const path: string[] = [];
+  function walk(nodes: LayerNode[]): boolean {
+    for (const node of nodes) {
+      if (node.id === targetId) return true;
+      if (node.children.length > 0) {
+        path.push(node.id);
+        if (walk(node.children)) return true;
+        path.pop();
+      }
+    }
+    return false;
+  }
+  walk(roots);
+  return path;
 }

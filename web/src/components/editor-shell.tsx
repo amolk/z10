@@ -13,6 +13,8 @@ import { PropertiesPanel } from "@/components/properties-panel";
 import { ConnectAgentButton } from "@/components/connect-agent-button";
 import { useAgentHighlight } from "@/lib/use-agent-highlight";
 import { AgentActivityPanel } from "@/components/agent-activity-panel";
+import { useEditor } from "@/lib/editor-state";
+import { PanelLeft, PanelRight, Sun, Moon } from "lucide-react";
 
 export function EditorShell({
   projectId,
@@ -49,6 +51,14 @@ function EditorShellInner({
   const { connectionState, lastOperation, operations, clearOperations } =
     useAgentStream(projectId);
   useAgentHighlight(lastOperation);
+  const {
+    leftPanelVisible,
+    rightPanelVisible,
+    setLeftPanelVisible,
+    setRightPanelVisible,
+    isDarkMode,
+    toggleDarkMode,
+  } = useEditor();
 
   return (
     <div className="flex h-screen flex-col">
@@ -66,23 +76,57 @@ function EditorShellInner({
             className="text-[12px] transition-colors hover:text-[var(--ed-text)]"
             style={{ color: "var(--ed-text-secondary)" }}
           >
-            ← Back
+            ← Zero10
           </Link>
           <span style={{ color: "var(--ed-panel-border)" }}>|</span>
           <span className="text-[13px] font-medium" style={{ color: "var(--ed-text)" }}>
             {projectName}
           </span>
         </div>
-        <ConnectAgentButton
-          projectId={projectId}
-          connectionState={connectionState}
-          lastTool={lastOperation?.tool ?? null}
-        />
+        <div className="flex items-center gap-1">
+          {/* Panel toggles */}
+          <button
+            onClick={() => setLeftPanelVisible(!leftPanelVisible)}
+            className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-[var(--ed-hover-bg)]"
+            style={{
+              color: leftPanelVisible ? "var(--ed-text)" : "var(--ed-text-tertiary)",
+            }}
+            title="Toggle layers panel"
+          >
+            <PanelLeft size={16} strokeWidth={1.5} />
+          </button>
+          <button
+            onClick={() => setRightPanelVisible(!rightPanelVisible)}
+            className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-[var(--ed-hover-bg)]"
+            style={{
+              color: rightPanelVisible ? "var(--ed-text)" : "var(--ed-text-tertiary)",
+            }}
+            title="Toggle properties panel"
+          >
+            <PanelRight size={16} strokeWidth={1.5} />
+          </button>
+          <div className="mx-1 h-4 w-px" style={{ backgroundColor: "var(--ed-panel-border)" }} />
+          {/* Dark mode toggle */}
+          <button
+            onClick={toggleDarkMode}
+            className="flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-[var(--ed-hover-bg)]"
+            style={{ color: "var(--ed-text-secondary)" }}
+            title={isDarkMode ? "Switch to light mode" : "Switch to dark mode"}
+          >
+            {isDarkMode ? <Sun size={16} strokeWidth={1.5} /> : <Moon size={16} strokeWidth={1.5} />}
+          </button>
+          <div className="mx-1 h-4 w-px" style={{ backgroundColor: "var(--ed-panel-border)" }} />
+          <ConnectAgentButton
+            projectId={projectId}
+            connectionState={connectionState}
+            lastTool={lastOperation?.tool ?? null}
+          />
+        </div>
       </header>
 
       {/* Editor body */}
       <div className="flex flex-1 overflow-hidden">
-        <LayersPanel />
+        {leftPanelVisible && <LayersPanel />}
         <ToolsToolbar />
 
         <div className="relative flex-1">
@@ -95,7 +139,7 @@ function EditorShellInner({
           />
         </div>
 
-        <PropertiesPanel />
+        {rightPanelVisible && <PropertiesPanel />}
       </div>
     </div>
   );

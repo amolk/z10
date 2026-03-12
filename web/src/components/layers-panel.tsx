@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 
 export function LayersPanel() {
-  const { layers, activePageId, setActivePageId } = useEditor();
+  const { layers, activePageId, setActivePageId, addPage, deletePage, duplicatePage, reorderPages } = useEditor();
   const [search, setSearch] = useState("");
 
   const activePage = layers.find((p) => p.id === activePageId) || layers[0];
@@ -46,6 +46,7 @@ export function LayersPanel() {
           Pages
         </span>
         <button
+          onClick={addPage}
           className="flex h-5 w-5 items-center justify-center rounded transition-colors"
           style={{ color: "var(--ed-icon-color)" }}
           title="Add page"
@@ -59,6 +60,9 @@ export function LayersPanel() {
         pages={layers}
         activePageId={activePageId ?? layers[0]?.id ?? ""}
         onSelectPage={setActivePageId}
+        onDeletePage={deletePage}
+        onDuplicatePage={duplicatePage}
+        onReorderPages={reorderPages}
       />
 
       {/* Layers header + search */}
@@ -82,7 +86,7 @@ export function LayersPanel() {
       <div className="border-b" style={{ borderColor: "var(--ed-section-border)" }} />
 
       {/* Tree */}
-      <div className="flex-1 overflow-y-auto py-0.5">
+      <div className="flex-1 overflow-y-auto py-0.5" style={{ minHeight: 0 }}>
         {filteredLayers.length > 0 ? (
           filteredLayers.map((node) => (
             <LayerRow key={node.id} node={node} />
@@ -103,10 +107,16 @@ function PageList({
   pages,
   activePageId,
   onSelectPage,
+  onDeletePage,
+  onDuplicatePage,
+  onReorderPages,
 }: {
   pages: LayerNode[];
   activePageId: string;
   onSelectPage: (id: string) => void;
+  onDeletePage: (id: string) => void;
+  onDuplicatePage: (id: string) => void;
+  onReorderPages: (from: number, to: number) => void;
 }) {
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -115,6 +125,8 @@ function PageList({
   } | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const dragFromIndex = useRef<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -136,6 +148,23 @@ function PageList({
     []
   );
 
+  const { content, updateContent } = useEditor();
+
+  const commitRename = useCallback(
+    (pageId: string, name: string) => {
+      setRenamingId(null);
+      if (!name.trim()) return;
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(content, "text/html");
+      const target = doc.querySelector(`[data-z10-id="${pageId}"]`);
+      if (target) {
+        target.setAttribute("data-z10-page", name);
+        updateContent(`<html${doc.documentElement.getAttribute("data-z10-project") ? ` data-z10-project="${doc.documentElement.getAttribute("data-z10-project")}"` : ""}>\n${doc.documentElement.innerHTML}\n</html>`);
+      }
+    },
+    [content, updateContent]
+  );
+
   const startRename = useCallback(
     (pageId: string) => {
       const page = pages.find((p) => p.id === pageId);
@@ -150,53 +179,102 @@ function PageList({
 
   return (
     <div className="border-b" style={{ borderColor: "var(--ed-section-border)" }}>
-      {pages.map((page) => (
-        <button
+      {pages.map((page, index) => (
+        <div
           key={page.id}
-          onClick={() => onSelectPage(page.id)}
-          onContextMenu={(e) => handleContextMenu(e, page.id)}
-          className="flex w-full items-center gap-2 px-3 py-1.5 text-[12px] transition-colors"
-          style={{
-            backgroundColor: page.id === activePageId ? "var(--ed-selected-bg)" : "transparent",
-            color: page.id === activePageId ? "var(--ed-selected-text)" : "var(--ed-text)",
+          className="relative"
+          draggable={renamingId !== page.id}
+          onDragStart={(e) => {
+            dragFromIndex.current = index;
+            e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.setData("application/x-z10-page", String(index));
+          }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            setDragOverIndex(index);
+          }}
+          onDragLeave={() => setDragOverIndex(null)}
+          onDrop={(e) => {
+            e.preventDefault();
+            const from = dragFromIndex.current;
+            if (from !== null && from !== index) {
+              onReorderPages(from, index);
+            }
+            dragFromIndex.current = null;
+            setDragOverIndex(null);
+          }}
+          onDragEnd={() => {
+            dragFromIndex.current = null;
+            setDragOverIndex(null);
           }}
         >
-          {/* Page icon */}
-          <Square
-            size={14}
-            strokeWidth={1}
-            style={{ color: page.id === activePageId ? "var(--ed-selected-text)" : "var(--ed-icon-color)", flexShrink: 0 }}
-          />
-          {renamingId === page.id ? (
-            <input
-              type="text"
-              value={renameValue}
-              onChange={(e) => setRenameValue(e.target.value)}
-              onBlur={() => setRenamingId(null)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === "Escape") setRenamingId(null);
-              }}
-              autoFocus
-              className="w-full rounded border px-1 py-0 text-[12px] focus:outline-none"
+          {/* Drop indicator line */}
+          {dragOverIndex === index && dragFromIndex.current !== null && dragFromIndex.current !== index && (
+            <div
+              className="pointer-events-none absolute left-2 right-2 z-10"
               style={{
-                borderColor: "var(--ed-input-border)",
-                backgroundColor: "var(--ed-input-bg)",
-                color: "var(--ed-text)",
+                top: dragFromIndex.current < index ? undefined : -1,
+                bottom: dragFromIndex.current < index ? -1 : undefined,
+                height: 2,
+                backgroundColor: "#3b82f6",
+                borderRadius: 1,
               }}
-              onClick={(e) => e.stopPropagation()}
-            />
-          ) : (
-            <span className="truncate">{page.name}</span>
+            >
+              <div
+                className="absolute rounded-full"
+                style={{ left: -3, top: -2, width: 6, height: 6, backgroundColor: "#3b82f6" }}
+              />
+            </div>
           )}
-          {page.id === activePageId && (
-            <Check
-              size={10}
-              strokeWidth={1.5}
-              className="ml-auto flex-shrink-0"
-              style={{ color: "var(--ed-selected-text)" }}
+
+          <button
+            onClick={() => onSelectPage(page.id)}
+            onContextMenu={(e) => handleContextMenu(e, page.id)}
+            onDoubleClick={() => startRename(page.id)}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-[12px] transition-colors"
+            style={{
+              backgroundColor: page.id === activePageId ? "var(--ed-selected-bg)" : "transparent",
+              color: page.id === activePageId ? "var(--ed-selected-text)" : "var(--ed-text)",
+            }}
+          >
+            <Square
+              size={14}
+              strokeWidth={1}
+              style={{ color: page.id === activePageId ? "var(--ed-selected-text)" : "var(--ed-icon-color)", flexShrink: 0 }}
             />
-          )}
-        </button>
+            {renamingId === page.id ? (
+              <input
+                type="text"
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                onBlur={() => commitRename(page.id, renameValue)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitRename(page.id, renameValue);
+                  if (e.key === "Escape") setRenamingId(null);
+                }}
+                autoFocus
+                className="w-full rounded border px-1 py-0 text-[12px] focus:outline-none"
+                style={{
+                  borderColor: "var(--ed-input-border)",
+                  backgroundColor: "var(--ed-input-bg)",
+                  color: "var(--ed-text)",
+                }}
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <span className="truncate">{page.name}</span>
+            )}
+            {page.id === activePageId && (
+              <Check
+                size={10}
+                strokeWidth={1.5}
+                className="ml-auto flex-shrink-0"
+                style={{ color: "var(--ed-selected-text)" }}
+              />
+            )}
+          </button>
+        </div>
       ))}
 
       {/* Context menu */}
@@ -213,32 +291,43 @@ function PageList({
         >
           <button
             onClick={() => startRename(contextMenu.pageId)}
-            className="flex w-full items-center px-3 py-1.5 text-left text-[12px] transition-colors"
+            className="flex w-full items-center px-3 py-1.5 text-left text-[12px] transition-colors hover:bg-[var(--ed-hover-bg)]"
             style={{ color: "var(--ed-text)" }}
           >
             Rename
           </button>
           <button
-            onClick={() => setContextMenu(null)}
-            className="flex w-full items-center px-3 py-1.5 text-left text-[12px] transition-colors"
+            onClick={() => { onDuplicatePage(contextMenu.pageId); setContextMenu(null); }}
+            className="flex w-full items-center px-3 py-1.5 text-left text-[12px] transition-colors hover:bg-[var(--ed-hover-bg)]"
             style={{ color: "var(--ed-text)" }}
           >
             Duplicate
           </button>
-          <div className="my-1 border-t" style={{ borderColor: "var(--ed-section-border)" }} />
-          <button
-            onClick={() => setContextMenu(null)}
-            className="flex w-full items-center px-3 py-1.5 text-left text-[12px] text-red-500"
-          >
-            Delete
-          </button>
+          {pages.length > 1 && (
+            <>
+              <div className="my-1 border-t" style={{ borderColor: "var(--ed-section-border)" }} />
+              <button
+                onClick={() => { onDeletePage(contextMenu.pageId); setContextMenu(null); }}
+                className="flex w-full items-center px-3 py-1.5 text-left text-[12px] text-red-500 transition-colors hover:bg-[var(--ed-hover-bg)]"
+              >
+                Delete
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-// ─── Layer Row (recursive tree node) ────────────────────────
+// ─── Drag & Drop State ──────────────────────────────────────
+
+type DropPosition = {
+  targetId: string;
+  position: "before" | "inside" | "after";
+};
+
+// ─── Layer Row (recursive tree node with drag & drop) ───────
 
 function LayerRow({ node }: { node: LayerNode }) {
   const {
@@ -250,25 +339,272 @@ function LayerRow({ node }: { node: LayerNode }) {
     toggleLock,
     collapsedIds,
     toggleCollapsed,
+    transformRef,
+    content,
+    updateContent,
   } = useEditor();
 
+  const rowRef = useRef<HTMLDivElement>(null);
   const isSelected = selectedIds.has(node.id);
   const isHidden = hiddenIds.has(node.id);
   const isLocked = lockedIds.has(node.id);
   const isCollapsed = collapsedIds.has(node.id);
   const hasChildren = node.children.length > 0;
 
+  // Drag state
+  const [isDragging, setIsDragging] = useState(false);
+  const [dropIndicator, setDropIndicator] = useState<"before" | "inside" | "after" | null>(null);
+
+  // Auto-scroll selected element into view
+  useEffect(() => {
+    if (isSelected && rowRef.current) {
+      rowRef.current.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [isSelected]);
+
+  // ─── Drag handlers ─────────────────────────────────────────
+  const handleDragStart = useCallback(
+    (e: React.DragEvent) => {
+      const isAltClone = e.altKey;
+      e.dataTransfer.setData("text/plain", node.id);
+      e.dataTransfer.setData("application/x-z10-clone", isAltClone ? "true" : "false");
+      e.dataTransfer.effectAllowed = isAltClone ? "copy" : "move";
+      setIsDragging(true);
+    },
+    [node.id]
+  );
+
+  const handleDragEnd = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  const handleDragOver = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = e.altKey ? "copy" : "move";
+
+      const rect = rowRef.current?.getBoundingClientRect();
+      if (!rect) return;
+
+      const y = e.clientY - rect.top;
+      const h = rect.height;
+
+      if (y < h * 0.25) {
+        setDropIndicator("before");
+      } else if (y > h * 0.75) {
+        setDropIndicator("after");
+      } else {
+        setDropIndicator("inside");
+      }
+    },
+    []
+  );
+
+  const handleDragLeave = useCallback(() => {
+    setDropIndicator(null);
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const draggedId = e.dataTransfer.getData("text/plain");
+      const isClone = e.dataTransfer.getData("application/x-z10-clone") === "true" || e.altKey;
+      if (!draggedId || draggedId === node.id) {
+        setDropIndicator(null);
+        return;
+      }
+
+      // Perform the move/clone in the content model
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(content, "text/html");
+      const draggedEl = doc.querySelector(`[data-z10-id="${draggedId}"]`);
+      const targetEl = doc.querySelector(`[data-z10-id="${node.id}"]`);
+
+      if (!draggedEl || !targetEl) {
+        setDropIndicator(null);
+        return;
+      }
+
+      // Prevent dropping into own descendants
+      if (draggedEl.contains(targetEl)) {
+        setDropIndicator(null);
+        return;
+      }
+
+      // Capture the dragged element's current rendered position (from live DOM)
+      // before moving, so we can assign absolute position if needed
+      let liveDraggedRect: DOMRect | null = null;
+      let livePageRect: DOMRect | null = null;
+      const liveDraggedEl = transformRef.current?.querySelector(`[data-z10-id="${draggedId}"]`) as HTMLElement | null;
+      if (liveDraggedEl) {
+        liveDraggedRect = liveDraggedEl.getBoundingClientRect();
+        // Find the enclosing page element for coordinate reference
+        const pageEl = liveDraggedEl.closest("[data-z10-page]") as HTMLElement | null;
+        if (pageEl) livePageRect = pageEl.getBoundingClientRect();
+      }
+
+      // Check if source parent is a flow container
+      const sourceParent = draggedEl.parentElement as HTMLElement | null;
+      const sourceIsFlow = sourceParent ? isFlowContainer(sourceParent) : false;
+
+      // For clone: duplicate the element with a new ID; for move: remove from current position
+      let elementToInsert: Element;
+      let newId: string;
+      if (isClone) {
+        elementToInsert = draggedEl.cloneNode(true) as Element;
+        newId = `${draggedId}_clone_${Date.now().toString(36)}`;
+        (elementToInsert as HTMLElement).setAttribute("data-z10-id", newId);
+      } else {
+        draggedEl.parentElement?.removeChild(draggedEl);
+        elementToInsert = draggedEl;
+        newId = draggedId;
+      }
+
+      // Determine the new parent after the move
+      let newParent: Element | null = null;
+      if (dropIndicator === "inside") {
+        newParent = targetEl;
+      } else {
+        newParent = targetEl.parentElement;
+      }
+
+      // Adjust positioning based on source/target container types
+      const insertHtmlEl = elementToInsert as HTMLElement;
+      const targetIsFlow = newParent instanceof HTMLElement ? isFlowContainer(newParent) : false;
+      const targetIsPage = newParent instanceof HTMLElement && newParent.hasAttribute("data-z10-page");
+
+      if (targetIsFlow && !targetIsPage && insertHtmlEl.style.position === "absolute") {
+        // Moving INTO a flow container → strip absolute positioning
+        insertHtmlEl.style.removeProperty("position");
+        insertHtmlEl.style.removeProperty("left");
+        insertHtmlEl.style.removeProperty("top");
+      } else if ((!targetIsFlow || targetIsPage) && sourceIsFlow && insertHtmlEl.style.position !== "absolute") {
+        // Moving OUT of a flow container → make absolute and set coordinates
+        insertHtmlEl.style.position = "absolute";
+        if (liveDraggedRect && livePageRect) {
+          insertHtmlEl.style.left = `${Math.round(liveDraggedRect.left - livePageRect.left)}px`;
+          insertHtmlEl.style.top = `${Math.round(liveDraggedRect.top - livePageRect.top)}px`;
+        }
+      }
+
+      // Insert at new position
+      if (dropIndicator === "before") {
+        targetEl.parentElement?.insertBefore(elementToInsert, targetEl);
+      } else if (dropIndicator === "after") {
+        if (targetEl.nextSibling) {
+          targetEl.parentElement?.insertBefore(elementToInsert, targetEl.nextSibling);
+        } else {
+          targetEl.parentElement?.appendChild(elementToInsert);
+        }
+      } else {
+        // "inside" - append as child
+        targetEl.appendChild(elementToInsert);
+      }
+
+      // Serialize and update
+      const result = `<html${doc.documentElement.getAttribute("data-z10-project") ? ` data-z10-project="${doc.documentElement.getAttribute("data-z10-project")}"` : ""}>\n${doc.documentElement.innerHTML}\n</html>`;
+      updateContent(result);
+
+      // Also update the live DOM
+      const liveDragged = transformRef.current?.querySelector(`[data-z10-id="${draggedId}"]`) as HTMLElement | null;
+      const liveTarget = transformRef.current?.querySelector(`[data-z10-id="${node.id}"]`) as HTMLElement | null;
+      if (liveDragged && liveTarget) {
+        // Capture live source parent flow state before removing
+        const liveSourceParent = liveDragged.parentElement;
+        const liveSourceIsFlow = liveSourceParent ? isLiveFlowContainer(liveSourceParent) : false;
+
+        let liveElement: HTMLElement;
+        if (isClone) {
+          liveElement = liveDragged.cloneNode(true) as HTMLElement;
+          liveElement.setAttribute("data-z10-id", newId);
+        } else {
+          liveDragged.parentElement?.removeChild(liveDragged);
+          liveElement = liveDragged;
+        }
+
+        // Determine the live new parent
+        let liveNewParent: HTMLElement | null = null;
+        if (dropIndicator === "inside") {
+          liveNewParent = liveTarget;
+        } else {
+          liveNewParent = liveTarget.parentElement;
+        }
+
+        // Adjust positioning in live DOM
+        if (liveNewParent) {
+          const liveTargetIsFlow = isLiveFlowContainer(liveNewParent);
+          const liveTargetIsPage = liveNewParent.hasAttribute("data-z10-page");
+
+          if (liveTargetIsFlow && !liveTargetIsPage && liveElement.style.position === "absolute") {
+            liveElement.style.removeProperty("position");
+            liveElement.style.removeProperty("left");
+            liveElement.style.removeProperty("top");
+          } else if ((!liveTargetIsFlow || liveTargetIsPage) && liveSourceIsFlow && liveElement.style.position !== "absolute") {
+            liveElement.style.position = "absolute";
+            if (liveDraggedRect && livePageRect) {
+              liveElement.style.left = `${Math.round(liveDraggedRect.left - livePageRect.left)}px`;
+              liveElement.style.top = `${Math.round(liveDraggedRect.top - livePageRect.top)}px`;
+            }
+          }
+        }
+
+        if (dropIndicator === "before") {
+          liveTarget.parentElement?.insertBefore(liveElement, liveTarget);
+        } else if (dropIndicator === "after") {
+          if (liveTarget.nextSibling) {
+            liveTarget.parentElement?.insertBefore(liveElement, liveTarget.nextSibling);
+          } else {
+            liveTarget.parentElement?.appendChild(liveElement);
+          }
+        } else {
+          liveTarget.appendChild(liveElement);
+        }
+      }
+
+      setDropIndicator(null);
+    },
+    [node.id, dropIndicator, content, updateContent, transformRef]
+  );
+
   return (
-    <div>
+    <div className="relative">
+      {/* Drop indicator: before */}
+      {dropIndicator === "before" && (
+        <div
+          className="pointer-events-none absolute left-2 right-2 z-10"
+          style={{ top: -1, height: 2, backgroundColor: "#3b82f6", borderRadius: 1 }}
+        >
+          <div
+            className="absolute rounded-full"
+            style={{ left: -3, top: -2, width: 6, height: 6, backgroundColor: "#3b82f6" }}
+          />
+        </div>
+      )}
+
       <div
+        ref={rowRef}
+        draggable
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
         className="group flex items-center gap-1.5 rounded-sm py-1 text-[12px]"
         style={{
           paddingLeft: (node.depth - 1) * 14 + 12,
           paddingRight: 4,
-          backgroundColor: isSelected ? "var(--ed-selected-bg)" : "transparent",
+          backgroundColor: dropIndicator === "inside"
+            ? "rgba(59, 130, 246, 0.12)"
+            : isSelected
+              ? "var(--ed-selected-bg)"
+              : "transparent",
           color: isSelected ? "var(--ed-selected-text)" : "var(--ed-text)",
-          opacity: isHidden ? 0.4 : 1,
+          opacity: isDragging ? 0.4 : isHidden ? 0.4 : 1,
           cursor: "default",
+          outline: dropIndicator === "inside" ? "1px dashed #3b82f6" : "none",
+          outlineOffset: "-1px",
         }}
         onClick={(e) => select(node.id, e.shiftKey)}
       >
@@ -333,6 +669,19 @@ function LayerRow({ node }: { node: LayerNode }) {
         </div>
       </div>
 
+      {/* Drop indicator: after */}
+      {dropIndicator === "after" && (
+        <div
+          className="pointer-events-none absolute left-2 right-2 z-10"
+          style={{ bottom: -1, height: 2, backgroundColor: "#3b82f6", borderRadius: 1 }}
+        >
+          <div
+            className="absolute rounded-full"
+            style={{ left: -3, top: -2, width: 6, height: 6, backgroundColor: "#3b82f6" }}
+          />
+        </div>
+      )}
+
       {hasChildren && !isCollapsed && (
         <div>
           {node.children.map((child) => (
@@ -379,4 +728,31 @@ function filterNodes(nodes: LayerNode[], search: string): LayerNode[] {
     }
   }
   return result;
+}
+
+// ─── Flow container detection helpers ────────────────────────
+
+/** Check if an element in the content model (DOMParser) is a flow container */
+function isFlowContainer(el: HTMLElement): boolean {
+  const display = el.style.display || "";
+  return (
+    display === "flex" ||
+    display === "inline-flex" ||
+    display === "grid" ||
+    display === "block" ||
+    display === "" ||
+    display === "inline-block"
+  );
+}
+
+/** Check if a live DOM element is a flow container using computed styles */
+function isLiveFlowContainer(el: HTMLElement): boolean {
+  const display = window.getComputedStyle(el).display;
+  return (
+    display === "flex" ||
+    display === "inline-flex" ||
+    display === "grid" ||
+    display === "block" ||
+    display === "inline-block"
+  );
 }

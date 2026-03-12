@@ -58,30 +58,36 @@ export function ToolsToolbar() {
 
   return (
     <div className="flex flex-col items-center py-1">
-      {TOOLS.map((tool) => (
-        <button
-          key={tool.id}
-          onClick={() => setActiveTool(tool.id)}
-          title={`${tool.label} (${tool.shortcut})`}
-          className="flex h-9 w-10 items-center justify-center rounded-sm transition-colors"
-          style={{
-            color: "var(--ed-text)",
-            opacity: activeTool === tool.id ? 1 : 0.55,
-          }}
-          onMouseEnter={(e) => {
-            if (activeTool !== tool.id) {
-              e.currentTarget.style.opacity = "0.8";
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (activeTool !== tool.id) {
-              e.currentTarget.style.opacity = "0.55";
-            }
-          }}
-        >
-          {tool.icon}
-        </button>
-      ))}
+      {TOOLS.map((tool) => {
+        const isActive = activeTool === tool.id;
+        return (
+          <button
+            key={tool.id}
+            onClick={() => setActiveTool(tool.id)}
+            title={`${tool.label} (${tool.shortcut})`}
+            className="flex h-9 w-10 items-center justify-center rounded-sm transition-colors"
+            style={{
+              color: "var(--ed-text)",
+              opacity: isActive ? 1 : 0.55,
+              backgroundColor: isActive ? "var(--ed-tool-active-bg)" : "transparent",
+            }}
+            onMouseEnter={(e) => {
+              if (!isActive) {
+                e.currentTarget.style.opacity = "0.8";
+                e.currentTarget.style.backgroundColor = "var(--ed-hover-bg)";
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!isActive) {
+                e.currentTarget.style.opacity = "0.55";
+                e.currentTarget.style.backgroundColor = "transparent";
+              }
+            }}
+          >
+            {tool.icon}
+          </button>
+        );
+      })}
     </div>
   );
 }
