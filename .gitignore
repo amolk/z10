@@ -48,3 +48,13 @@ target/
 
 # Superpowers brainstorm sessions
 .superpowers/
+
+# Build output
+dist/
+.next/
+
+# Database files
+*.db
+
+# Screenshots
+*.png
