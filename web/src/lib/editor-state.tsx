@@ -30,9 +30,13 @@ export type ElementStyles = {
   y: string;
   rotation: string;
   borderRadius: string;
+  borderTopLeftRadius: string;
+  borderTopRightRadius: string;
+  borderBottomRightRadius: string;
+  borderBottomLeftRadius: string;
   fills: { color: string; opacity: number }[];
   stroke: { color: string; width: string; style: string; position: string };
-  effects: { type: string; enabled: boolean; x?: string; y?: string; blur?: string; spread?: string; color?: string }[];
+  effects: { type: "drop-shadow" | "inner-shadow"; enabled: boolean; x: string; y: string; blur: string; spread: string; color: string }[];
   fontFamily: string;
   fontWeight: string;
   fontSize: string;
@@ -41,8 +45,14 @@ export type ElementStyles = {
   textAlign: string;
   color: string;
   opacity: string;
+  mixBlendMode: string;
+  visibility: string;
+  overflow: string;
+  position: string;
   display: string;
   flexDirection: string;
+  alignItems: string;
+  justifyContent: string;
   gap: string;
   paddingTop: string;
   paddingRight: string;
@@ -245,12 +255,11 @@ export function getElementStyles(el: HTMLElement): ElementStyles {
     fills.push({ color: bgColor, opacity: 1 });
   }
 
-  // Parse box shadow into effects
+  // Parse box shadow into effects — supports multiple shadows
   const effects: ElementStyles["effects"] = [];
-  const shadow = computed.boxShadow;
+  const shadow = inline.boxShadow || computed.boxShadow;
   if (shadow && shadow !== "none") {
-    // Basic shadow parsing
-    effects.push({ type: "drop-shadow", enabled: true, blur: "4", spread: "0", color: "rgba(0,0,0,0.25)" });
+    parseShadows(shadow).forEach((s) => effects.push(s));
   }
 
   return {
@@ -260,6 +269,10 @@ export function getElementStyles(el: HTMLElement): ElementStyles {
     y: inline.top || computed.top || "0",
     rotation: inline.rotate || "0",
     borderRadius: inline.borderRadius || computed.borderRadius || "0px",
+    borderTopLeftRadius: inline.borderTopLeftRadius || computed.borderTopLeftRadius || "0px",
+    borderTopRightRadius: inline.borderTopRightRadius || computed.borderTopRightRadius || "0px",
+    borderBottomRightRadius: inline.borderBottomRightRadius || computed.borderBottomRightRadius || "0px",
+    borderBottomLeftRadius: inline.borderBottomLeftRadius || computed.borderBottomLeftRadius || "0px",
     fills,
     stroke: {
       color: inline.borderColor || computed.borderColor || "transparent",
@@ -276,14 +289,73 @@ export function getElementStyles(el: HTMLElement): ElementStyles {
     textAlign: inline.textAlign || computed.textAlign || "left",
     color: inline.color || computed.color || "",
     opacity: inline.opacity || computed.opacity || "1",
+    mixBlendMode: inline.mixBlendMode || computed.mixBlendMode || "normal",
+    visibility: inline.visibility || computed.visibility || "visible",
+    overflow: inline.overflow || computed.overflow || "visible",
+    position: inline.position || computed.position || "static",
     display: inline.display || computed.display || "block",
     flexDirection: inline.flexDirection || computed.flexDirection || "row",
+    alignItems: inline.alignItems || computed.alignItems || "stretch",
+    justifyContent: inline.justifyContent || computed.justifyContent || "flex-start",
     gap: inline.gap || computed.gap || "0px",
     paddingTop: inline.paddingTop || computed.paddingTop || "0px",
     paddingRight: inline.paddingRight || computed.paddingRight || "0px",
     paddingBottom: inline.paddingBottom || computed.paddingBottom || "0px",
     paddingLeft: inline.paddingLeft || computed.paddingLeft || "0px",
   };
+}
+
+/** Parse CSS box-shadow string into structured effect objects */
+function parseShadows(raw: string): ElementStyles["effects"] {
+  const results: ElementStyles["effects"] = [];
+  if (!raw || raw === "none") return results;
+
+  // Split on commas that are not inside parentheses
+  const parts: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of raw) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    else if (ch === "," && depth === 0) {
+      parts.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) parts.push(current.trim());
+
+  for (const part of parts) {
+    const isInset = part.includes("inset");
+    const cleaned = part.replace("inset", "").trim();
+    // Extract color — either rgb/rgba(...) or hex at start/end
+    let color = "rgba(0,0,0,0.25)";
+    let nums = cleaned;
+    const rgbaMatch = cleaned.match(/rgba?\([^)]+\)/);
+    if (rgbaMatch) {
+      color = rgbaMatch[0];
+      nums = cleaned.replace(rgbaMatch[0], "").trim();
+    } else {
+      const hexMatch = cleaned.match(/#[0-9a-fA-F]{3,8}/);
+      if (hexMatch) {
+        color = hexMatch[0];
+        nums = cleaned.replace(hexMatch[0], "").trim();
+      }
+    }
+    // Parse numeric values: x y blur spread
+    const values = nums.match(/-?[\d.]+/g) || [];
+    results.push({
+      type: isInset ? "inner-shadow" : "drop-shadow",
+      enabled: true,
+      x: values[0] || "0",
+      y: values[1] || "0",
+      blur: values[2] || "0",
+      spread: values[3] || "0",
+      color,
+    });
+  }
+  return results;
 }
 
 // ─── .z10.html → LayerNode tree parser ──────────────────────
