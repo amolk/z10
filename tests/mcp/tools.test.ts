@@ -50,8 +50,8 @@ describe('MCP Tools', () => {
       expect(READ_TOOLS.length).toBe(7);
     });
 
-    it('has 12 write tools', () => {
-      expect(WRITE_TOOLS.length).toBe(12);
+    it('has 13 write tools', () => {
+      expect(WRITE_TOOLS.length).toBe(13);
     });
 
     it('all tools have name, description, and inputSchema', () => {
@@ -136,7 +136,7 @@ describe('MCP Tools', () => {
 
     it('get_guide returns help text', () => {
       const result = handleReadTool(doc, 'get_guide', {});
-      expect(result).toContain('12 write commands');
+      expect(result).toContain('13 write commands');
     });
 
     it('get_guide with specific topic', () => {

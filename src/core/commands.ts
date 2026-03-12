@@ -17,6 +17,7 @@ import type {
   BatchCommand,
   AttrCommand,
   WriteHtmlCommand,
+  PageCommand,
   NodeId,
 } from './types.js';
 
@@ -25,6 +26,7 @@ import { resolveFakerProps } from '../runtime/faker.js';
 import {
   createNode,
   addNode,
+  addPage,
   removeNode,
   moveNode,
   updateStyles,
@@ -68,6 +70,7 @@ export function executeCommand(doc: Z10Document, cmd: Z10Command): CommandResult
     case 'batch': return execBatch(doc, cmd);
     case 'attr': return execAttr(doc, cmd);
     case 'write_html': return execWriteHtml(doc, cmd);
+    case 'page': return execPage(doc, cmd);
     default:
       return error('INVALID_COMMAND', `Unknown command type`, cmd as Z10Command);
   }
@@ -311,4 +314,31 @@ function execWriteHtml(doc: Z10Document, cmd: WriteHtmlCommand): CommandResult {
   const node = getNode(doc, cmd.id)!;
   node.attributes['data-z10-raw-html'] = cmd.html;
   return success(cmd.id);
+}
+
+function execPage(doc: Z10Document, cmd: PageCommand): CommandResult {
+  // Check for duplicate page name
+  if (doc.pages.some(p => p.name === cmd.name)) {
+    return error('INVALID_COMMAND', `Page already exists: ${cmd.name}`, cmd);
+  }
+
+  const rootId = cmd.rootId ?? `page_${doc.pages.length + 1}_root`;
+
+  // Don't create root node if it already exists
+  if (doc.nodes.has(rootId)) {
+    return error('NODE_EXISTS', `NODE_EXISTS: ${rootId}`, cmd);
+  }
+
+  const rootNode = createNode({
+    id: rootId,
+    tag: 'div',
+    parent: null,
+    intent: 'layout',
+    editor: 'agent',
+    style: 'width: 1440px; min-height: 900px; background: #ffffff; position: relative;',
+  });
+  addNode(doc, rootNode);
+  addPage(doc, { name: cmd.name, rootNodeId: rootId, mode: cmd.mode ?? doc.config.defaultMode });
+
+  return success(rootId, `Page "${cmd.name}" created with root node "${rootId}"`);
 }

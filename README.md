@@ -177,6 +177,44 @@ Supported categories: `person`, `company`, `lorem`, `date`, `number`, `image`, `
 
 Pages support light/dark modes via the `data-z10-mode` attribute. The runtime provides programmatic switching and mode-aware token resolution.
 
+## Web App
+
+The `web/` directory contains a Next.js 16 application providing a visual editor, team collaboration, and hosted MCP endpoints.
+
+### Setup
+
+```bash
+cd web
+cp .env.example .env.local  # Configure auth + database
+npm install
+npm run dev
+```
+
+### MCP Endpoints
+
+| Endpoint | Purpose |
+|----------|---------|
+| `/api/projects/[projectId]/mcp` | Per-project MCP (scoped to one project) |
+| `/api/mcp` | Global MCP (agent selects project dynamically) |
+
+Both endpoints support session + API key authentication. Connect from any MCP client:
+
+```bash
+# Per-project
+claude mcp add zero10 --transport http http://localhost:3000/api/projects/<id>/mcp
+
+# Global (agent picks project)
+claude mcp add zero10 --transport http http://localhost:3000/api/mcp
+```
+
+### Features
+
+- **Real-time streaming**: Agent edits appear instantly via SSE with visual highlights
+- **Infinite canvas editor**: DOM-based with CSS transforms, selection, and multi-page support
+- **Agent activity panel**: Live operation log with per-operation undo
+- **Plan management**: Free/Pro/Team tiers with Stripe billing
+- **API key auth**: SHA-256 hashed keys for headless agent access
+
 ## Architecture
 
 ```
@@ -206,7 +244,7 @@ src/
 ```bash
 npm install          # Install dependencies
 npm run build        # Compile TypeScript
-npm test             # Run tests (208 tests, ~250ms)
+npm test             # Run tests (277 tests, ~65ms)
 npm run test:watch   # Watch mode
 npm run test:coverage # Coverage report
 npm run lint         # Type-check only

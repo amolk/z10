@@ -12,7 +12,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFile, writeFile } from 'node:fs/promises';
 import type { Z10Document } from '../core/types.js';
-import { createDocument } from '../core/document.js';
+import { createDocument, createDocumentWithPage } from '../core/document.js';
 import { parseZ10Html } from '../format/parser.js';
 import { serializeZ10Html } from '../format/serializer.js';
 import {
@@ -36,7 +36,7 @@ export interface Z10ServerOptions {
 }
 
 /** The in-memory document state managed by the server */
-let currentDoc: Z10Document = createDocument();
+let currentDoc: Z10Document = createDocumentWithPage();
 let currentFilePath: string | null = null;
 
 /** Get the current document (for testing) */
@@ -153,7 +153,7 @@ export async function startServer(options: Z10ServerOptions = {}): Promise<void>
       console.log(`Loaded: ${options.filePath} (${currentDoc.nodes.size} nodes, ${currentDoc.components.size} components)`);
     } catch (err) {
       console.log(`Creating new document (file not found: ${options.filePath})`);
-      currentDoc = createDocument();
+      currentDoc = createDocumentWithPage();
       currentFilePath = options.filePath;
     }
   }

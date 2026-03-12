@@ -224,7 +224,14 @@ export interface WriteHtmlCommand {
   html: string;
 }
 
-/** Union of all 12 command types */
+export interface PageCommand {
+  type: 'page';
+  name: string;
+  rootId?: NodeId;
+  mode?: DisplayMode;
+}
+
+/** Union of all command types */
 export type Z10Command =
   | NodeCommand
   | TextCommand
@@ -237,7 +244,8 @@ export type Z10Command =
   | TokensCommand
   | BatchCommand
   | AttrCommand
-  | WriteHtmlCommand;
+  | WriteHtmlCommand
+  | PageCommand;
 
 // ---------------------------------------------------------------------------
 // Command Results

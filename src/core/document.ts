@@ -43,6 +43,21 @@ export function createDocument(config?: Partial<ProjectConfig>): Z10Document {
   };
 }
 
+/** Create a new Z10 document with a default page ready for use */
+export function createDocumentWithPage(config?: Partial<ProjectConfig>): Z10Document {
+  const doc = createDocument(config);
+  const rootNode = createNode({
+    id: 'page_root',
+    tag: 'div',
+    parent: null,
+    intent: 'layout',
+    style: 'width: 1440px; min-height: 900px; background: #ffffff; position: relative;',
+  });
+  addNode(doc, rootNode);
+  doc.pages.push({ name: 'Page 1', rootNodeId: 'page_root', mode: doc.config.defaultMode });
+  return doc;
+}
+
 // ---------------------------------------------------------------------------
 // Node Operations
 // ---------------------------------------------------------------------------

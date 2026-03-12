@@ -137,7 +137,9 @@ function serializePage(doc: Z10Document, page: Z10Page): string {
   const root = doc.nodes.get(page.rootNodeId);
   if (!root) return '';
 
-  return `<div data-z10-page="${escapeHtml(page.name)}" data-z10-mode="${page.mode}" data-z10-id="${escapeHtml(root.id)}">\n${serializeChildren(doc, root.id, 1)}\n</div>`;
+  const styleStr = serializeStyle(root.styles);
+  const styleAttr = styleStr ? ` style="${escapeHtml(styleStr)}"` : '';
+  return `<div data-z10-page="${escapeHtml(page.name)}" data-z10-mode="${page.mode}" data-z10-id="${escapeHtml(root.id)}"${styleAttr}>\n${serializeChildren(doc, root.id, 1)}\n</div>`;
 }
 
 function serializeChildren(doc: Z10Document, parentId: NodeId, depth: number): string {

@@ -120,6 +120,19 @@ export const READ_TOOLS: ToolDefinition[] = [
 
 export const WRITE_TOOLS: ToolDefinition[] = [
   {
+    name: 'z10_page',
+    description: 'Create a new page with a root node. Required before adding any other nodes to an empty document.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Page name (e.g. "Page 1")' },
+        rootId: { type: 'string', description: 'Root node ID (optional, auto-generated if omitted)' },
+        mode: { type: 'string', enum: ['light', 'dark'], description: 'Display mode (default: project default)' },
+      },
+      required: ['name'],
+    },
+  },
+  {
     name: 'z10_node',
     description: 'Create a container element. Errors if ID exists or parent missing.',
     inputSchema: {
@@ -549,7 +562,8 @@ function handleGetTokens(doc: Z10Document, collection?: string): string {
 
 function handleGetGuide(topic?: string): string {
   const guides: Record<string, string> = {
-    commands: `Zero-10 has 12 write commands:
+    commands: `Zero-10 has 13 write commands:
+0. z10_page(name, rootId?, mode?) - Create a page (required first for empty documents)
 1. z10_node(id, tag, parent) - Create container
 2. z10_text(id, parent, content) - Create text
 3. z10_instance(id, component, parent) - Instantiate component
@@ -596,6 +610,14 @@ Use z10_repeat for multiple instances with faker data.`,
 
 function writeToolToCommand(name: string, args: ToolArgs): Z10Command | null {
   switch (name) {
+    case 'z10_page':
+      return {
+        type: 'page',
+        name: args['name'] as string,
+        rootId: args['rootId'] as string | undefined,
+        mode: args['mode'] as 'light' | 'dark' | undefined,
+      };
+
     case 'z10_node':
       return {
         type: 'node',

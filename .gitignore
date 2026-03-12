@@ -45,3 +45,6 @@ target/
 
 # Ralph backup directories (created by migration)
 .ralph_backup_*
+
+# Superpowers brainstorm sessions
+.superpowers/
