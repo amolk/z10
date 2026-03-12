@@ -1,0 +1,144 @@
+@import "tailwindcss";
+
+/* ─── Editor Theme Variables ─────────────────────────────── */
+
+:root {
+  /* Light theme (default) */
+  --ed-bg: #f2f2f2;
+  --ed-text: rgba(0, 0, 0, 0.8);
+  --ed-text-secondary: rgba(0, 0, 0, 0.5);
+  --ed-text-tertiary: rgba(0, 0, 0, 0.4);
+  --ed-panel-bg: #f2f2f2;
+  --ed-panel-border: #e2e2e2;
+  --ed-canvas-bg: #b4b4b4;
+  --ed-input-bg: #f9f9f9;
+  --ed-input-border: rgba(0, 0, 0, 0.15);
+  --ed-input-border-focus: rgba(0, 0, 0, 0.3);
+  --ed-hover-bg: #eaeaea;
+  --ed-selected-bg: #dbeafe;
+  --ed-selected-text: #1d4ed8;
+  --ed-section-border: #e2e2e2;
+  --ed-icon-color: rgba(0, 0, 0, 0.6);
+  --ed-icon-hover: rgba(0, 0, 0, 0.8);
+  --ed-tool-active-bg: #e2e2e2;
+  --ed-tool-active-text: rgba(0, 0, 0, 0.8);
+  --ed-overlay-bg: rgba(242, 242, 242, 0.95);
+  --ed-overlay-border: #e2e2e2;
+  --ed-badge-bg: #eaeaea;
+  --ed-badge-text: rgba(0, 0, 0, 0.5);
+}
+
+html.dark {
+  --ed-bg: #09090b;
+  --ed-text: #fafafa;
+  --ed-text-secondary: #a1a1aa;
+  --ed-text-tertiary: #71717a;
+  --ed-panel-bg: #09090b;
+  --ed-panel-border: #27272a;
+  --ed-canvas-bg: #18181b;
+  --ed-input-bg: #18181b;
+  --ed-input-border: #3f3f46;
+  --ed-input-border-focus: #71717a;
+  --ed-hover-bg: #27272a;
+  --ed-selected-bg: rgba(37, 99, 235, 0.2);
+  --ed-selected-text: #93c5fd;
+  --ed-section-border: #27272a;
+  --ed-icon-color: #a1a1aa;
+  --ed-icon-hover: #d4d4d8;
+  --ed-tool-active-bg: rgba(255, 255, 255, 0.15);
+  --ed-tool-active-text: #ffffff;
+  --ed-overlay-bg: rgba(24, 24, 27, 0.95);
+  --ed-overlay-border: #3f3f46;
+  --ed-badge-bg: #27272a;
+  --ed-badge-text: #a1a1aa;
+}
+
+@theme inline {
+  --color-background: var(--ed-bg);
+  --color-foreground: var(--ed-text);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--ed-bg);
+  color: var(--ed-text);
+  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
+}
+
+/* ─── Agent Edit Highlighting (PRD 2.9) ───────────────────── */
+
+/* Blue pulse on created elements (1.5s) */
+.z10-highlight-add {
+  animation: z10-pulse-add 1.5s ease-out;
+}
+
+@keyframes z10-pulse-add {
+  0% {
+    outline: 3px solid rgba(59, 130, 246, 0.9);
+    outline-offset: 2px;
+    box-shadow: 0 0 12px rgba(59, 130, 246, 0.5);
+  }
+  50% {
+    outline: 3px solid rgba(59, 130, 246, 0.5);
+    outline-offset: 2px;
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+  }
+  100% {
+    outline: 3px solid transparent;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 transparent;
+  }
+}
+
+/* Property flash on modified elements (600ms) */
+.z10-highlight-modify {
+  animation: z10-flash-modify 0.6s ease-out;
+}
+
+@keyframes z10-flash-modify {
+  0% {
+    outline: 2px solid rgba(250, 204, 21, 0.8);
+    outline-offset: 1px;
+    box-shadow: 0 0 8px rgba(250, 204, 21, 0.4);
+  }
+  100% {
+    outline: 2px solid transparent;
+    outline-offset: 1px;
+    box-shadow: 0 0 0 transparent;
+  }
+}
+
+/* Red flash on removed elements (300ms) */
+.z10-highlight-remove {
+  animation: z10-flash-remove 0.3s ease-out;
+}
+
+@keyframes z10-flash-remove {
+  0% {
+    outline: 2px solid rgba(239, 68, 68, 0.9);
+    outline-offset: 1px;
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+    opacity: 1;
+  }
+  100% {
+    outline: 2px solid transparent;
+    outline-offset: 1px;
+    box-shadow: 0 0 0 transparent;
+    opacity: 0.3;
+  }
+}
+
+/* Parent context tint (subtle blue background pulse) */
+.z10-highlight-parent {
+  animation: z10-parent-tint 1.5s ease-out;
+}
+
+@keyframes z10-parent-tint {
+  0% {
+    background-color: rgba(59, 130, 246, 0.08);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
