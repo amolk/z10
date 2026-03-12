@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { EditorProvider } from "@/lib/editor-state";
 import { useKeyboardShortcuts } from "@/lib/use-keyboard-shortcuts";
 import { useAutoSave } from "@/lib/use-auto-save";
@@ -9,29 +10,37 @@ import { ToolsToolbar } from "@/components/tools-toolbar";
 import { LayersPanel } from "@/components/layers-panel";
 import { EditorCanvas } from "@/components/editor-canvas";
 import { PropertiesPanel } from "@/components/properties-panel";
-import { AgentStatusIndicator } from "@/components/agent-status-indicator";
+import { ConnectAgentButton } from "@/components/connect-agent-button";
 import { useAgentHighlight } from "@/lib/use-agent-highlight";
 import { AgentActivityPanel } from "@/components/agent-activity-panel";
 
 export function EditorShell({
   projectId,
+  projectName,
   initialContent,
 }: {
   projectId: string;
+  projectName: string;
   initialContent: string;
 }) {
   return (
     <EditorProvider initialContent={initialContent}>
-      <EditorShellInner projectId={projectId} initialContent={initialContent} />
+      <EditorShellInner
+        projectId={projectId}
+        projectName={projectName}
+        initialContent={initialContent}
+      />
     </EditorProvider>
   );
 }
 
 function EditorShellInner({
   projectId,
+  projectName,
   initialContent,
 }: {
   projectId: string;
+  projectName: string;
   initialContent: string;
 }) {
   useKeyboardShortcuts();
@@ -42,35 +51,52 @@ function EditorShellInner({
   useAgentHighlight(lastOperation);
 
   return (
-    <div className="flex flex-1 overflow-hidden">
-      {/* Left pane: Layers */}
-      <LayersPanel />
+    <div className="flex h-screen flex-col">
+      {/* Header */}
+      <header
+        className="flex items-center justify-between border-b px-4 py-1.5"
+        style={{
+          backgroundColor: "var(--ed-panel-bg)",
+          borderColor: "var(--ed-panel-border)",
+        }}
+      >
+        <div className="flex items-center gap-2">
+          <Link
+            href="/dashboard"
+            className="text-[12px] transition-colors hover:text-[var(--ed-text)]"
+            style={{ color: "var(--ed-text-secondary)" }}
+          >
+            ← Back
+          </Link>
+          <span style={{ color: "var(--ed-panel-border)" }}>|</span>
+          <span className="text-[13px] font-medium" style={{ color: "var(--ed-text)" }}>
+            {projectName}
+          </span>
+        </div>
+        <ConnectAgentButton
+          projectId={projectId}
+          connectionState={connectionState}
+          lastTool={lastOperation?.tool ?? null}
+        />
+      </header>
 
-      {/* Tools toolbar — left edge, between layers and canvas */}
-      <ToolsToolbar />
+      {/* Editor body */}
+      <div className="flex flex-1 overflow-hidden">
+        <LayersPanel />
+        <ToolsToolbar />
 
-      {/* Canvas area — relative container for overlays */}
-      <div className="relative flex-1">
-        <EditorCanvas initialContent={initialContent} saveState={saveState} />
+        <div className="relative flex-1">
+          <EditorCanvas initialContent={initialContent} saveState={saveState} />
 
-        {/* Agent connection status — bottom-left overlay */}
-        <div className="pointer-events-none absolute bottom-14 left-3 z-10">
-          <AgentStatusIndicator
+          <AgentActivityPanel
+            operations={operations}
             connectionState={connectionState}
-            lastTool={lastOperation?.tool ?? null}
+            onClear={clearOperations}
           />
         </div>
 
-        {/* Agent Activity panel — bottom overlay */}
-        <AgentActivityPanel
-          operations={operations}
-          connectionState={connectionState}
-          onClear={clearOperations}
-        />
+        <PropertiesPanel />
       </div>
-
-      {/* Right pane: Properties */}
-      <PropertiesPanel />
     </div>
   );
 }

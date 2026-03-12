@@ -64,9 +64,9 @@ export function LayersPanel() {
       {/* Layers header + search */}
       <div className="flex flex-col">
         <div
-          className="flex items-center gap-1.5 px-2 py-1.5"
+          className="flex items-center gap-2 px-3 py-1.5"
         >
-          <Search size={12} strokeWidth={1.5} style={{ color: "var(--ed-icon-color)", flexShrink: 0 }} />
+          <Search size={14} strokeWidth={1} style={{ color: "var(--ed-icon-color)", flexShrink: 0 }} />
           <input
             type="text"
             placeholder="Search layers..."
@@ -263,7 +263,7 @@ function LayerRow({ node }: { node: LayerNode }) {
       <div
         className="group flex items-center gap-1.5 rounded-sm py-1 text-[12px]"
         style={{
-          paddingLeft: node.depth * 14 + 4,
+          paddingLeft: (node.depth - 1) * 14 + 12,
           paddingRight: 4,
           backgroundColor: isSelected ? "var(--ed-selected-bg)" : "transparent",
           color: isSelected ? "var(--ed-selected-text)" : "var(--ed-text)",

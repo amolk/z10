@@ -2,10 +2,19 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Plus } from "lucide-react";
+import type { AgentConnectionState } from "@/lib/use-agent-stream";
 
 type ClientTab = "claude-code" | "cursor" | "other";
 
-export function ConnectAgentButton({ projectId }: { projectId: string }) {
+export function ConnectAgentButton({
+  projectId,
+  connectionState,
+  lastTool,
+}: {
+  projectId: string;
+  connectionState: AgentConnectionState;
+  lastTool: string | null;
+}) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ClientTab>("claude-code");
@@ -120,25 +129,51 @@ export function ConnectAgentButton({ projectId }: { projectId: string }) {
     setTimeout(() => setCopied(null), 2000);
   }
 
+  const isConnected = connectionState === "connected";
+  const isConnecting = connectionState === "connecting";
   const commands = buildCommands();
   const current = commands[activeTab];
 
   return (
     <>
-      <button
-        onClick={() => setOpen(true)}
-        className="rounded-md border px-3 py-1 text-[12px] font-medium transition-colors"
-        style={{
-          borderColor: "var(--ed-input-border)",
-          color: "var(--ed-text)",
-          backgroundColor: "var(--ed-panel-bg)",
-        }}
-      >
-        <span className="flex items-center gap-1.5">
-          <Plus size={11} strokeWidth={1.5} className="text-blue-500" />
-          Connect Agent
-        </span>
-      </button>
+      {/* Connected state: green dot + status text */}
+      {(isConnected || isConnecting) ? (
+        <div className="flex items-center gap-2 text-[12px]" style={{ color: "var(--ed-text-secondary)" }}>
+          <span className="relative flex h-2 w-2">
+            {isConnected && (
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
+            )}
+            <span
+              className={`relative inline-flex h-2 w-2 rounded-full ${
+                isConnected ? "bg-green-500" : "bg-yellow-500"
+              }`}
+            />
+          </span>
+          <span>
+            {isConnected
+              ? lastTool
+                ? `Agent active \u00b7 ${formatToolName(lastTool)}`
+                : "Agent connected"
+              : "Connecting..."}
+          </span>
+        </div>
+      ) : (
+        /* Disconnected state: connect button */
+        <button
+          onClick={() => setOpen(true)}
+          className="rounded-md border px-3 py-1 text-[12px] font-medium transition-colors"
+          style={{
+            borderColor: "var(--ed-input-border)",
+            color: "var(--ed-text)",
+            backgroundColor: "var(--ed-panel-bg)",
+          }}
+        >
+          <span className="flex items-center gap-1.5">
+            <Plus size={11} strokeWidth={1.5} className="text-blue-500" />
+            Connect Agent
+          </span>
+        </button>
+      )}
 
       {open && (
         <div
@@ -267,4 +302,12 @@ export function ConnectAgentButton({ projectId }: { projectId: string }) {
       )}
     </>
   );
+}
+
+function formatToolName(tool: string): string {
+  return tool
+    .replace(/^z10_/, "")
+    .replace(/^write_/, "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
