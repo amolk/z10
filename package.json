@@ -5,6 +5,24 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./cli/exec": {
+      "types": "./dist/cli/exec.d.ts",
+      "default": "./dist/cli/exec.js"
+    },
+    "./cli/checksum": {
+      "types": "./dist/cli/checksum.d.ts",
+      "default": "./dist/cli/checksum.js"
+    },
+    "./cli/dom": {
+      "types": "./dist/cli/dom.d.ts",
+      "default": "./dist/cli/dom.js"
+    }
+  },
   "bin": {
     "z10": "dist/cli/index.js"
   },
