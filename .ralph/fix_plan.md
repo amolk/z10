@@ -74,13 +74,13 @@ No backwards compat: this is a new `src/dom/` module. Does NOT extend the existi
 
 No backwards compat: delete `src/cli/checksum.ts`, gut `src/cli/exec.ts` (remove acorn parsing, statement splitting, var rewriting), gut `src/cli/dom.ts` (remove checksum-based state sync). The CLI becomes a thin wrapper around the shared core engine from Phase A.
 
-- [ ] **B1. CLI DOM replica** — Long-lived happy-dom instance in the CLI process holding full document copy with all `data-z10-id` and `data-z10-ts-*`. Kept in sync via patch stream. Uses `replayPatch` (A15). Replaces `src/cli/dom.ts`. (§8.1)
+- [x] **B1. CLI DOM replica** — Long-lived happy-dom instance in the CLI process holding full document copy with all `data-z10-id` and `data-z10-ts-*`. Kept in sync via patch stream. Uses `replayPatch` (A15). Replaces `src/cli/dom.ts`. (§8.1)
 
-- [ ] **B2. Read tickets + getSubtree** — `getSubtree(selector, depth?)` → `{html, ticketId}`. Uses `stripForAgent` (A17). Ticket stores manifest: snapshot of all `data-z10-ts-*` timestamps for every node in the returned subtree. `depth` parameter limits traversal for large documents. Single-use tickets, 60s TTL, garbage collected. (§8.2, §8.4, §8.8)
+- [x] **B2. Read tickets + getSubtree** — `getSubtree(selector, depth?)` → `{html, ticketId}`. Uses `stripForAgent` (A17). Ticket stores manifest: snapshot of all `data-z10-ts-*` timestamps for every node in the returned subtree. `depth` parameter limits traversal for large documents. Single-use tickets, 60s TTL, garbage collected. (§8.2, §8.4, §8.8)
 
-- [ ] **B3. Local validation + submitCode** — On `submitCode(code, ticketId)`: look up ticket manifest → run transaction engine (A9) against LOCAL DOM → reject locally (free, no network) or forward `{code, manifest, subtreeRootNid}` to server. On local reject: serve fresh HTML from local DOM + new ticket. (§8.5)
+- [x] **B3. Local validation + submitCode** — On `submitCode(code, ticketId)`: look up ticket manifest → run transaction engine (A9) against LOCAL DOM → reject locally (free, no network) or forward `{code, manifest, subtreeRootNid}` to server. On local reject: serve fresh HTML from local DOM + new ticket. (§8.5)
 
-- [ ] **B4. refreshSubtree** — `refreshSubtree(ticketId)` → `{changed, html?, newTicketId?}`. Checks if the subtree has changed since the ticket was issued by comparing `data-z10-ts-tree` on the subtree root. If changed, returns fresh stripped HTML + new ticket. If unchanged, returns `{changed: false}`. (§8.2)
+- [x] **B4. refreshSubtree** — `refreshSubtree(ticketId)` → `{changed, html?, newTicketId?}`. Checks if the subtree has changed since the ticket was issued by comparing `data-z10-ts-tree` on the subtree root. If changed, returns fresh stripped HTML + new ticket. If unchanged, returns `{changed: false}`. (§8.2)
 
 - [ ] **B5. CLI SSE patch consumer** — Connect to server SSE stream. Replay patches against CLI's local DOM via `replayPatch` (A15). Track `lastSeenTxId`. Handle reconnection: send `lastSeenTxId`, receive missed patches or full resync. (§7.4, §8.1)
 

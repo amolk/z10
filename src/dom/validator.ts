@@ -10,7 +10,7 @@
 import type { WriteSetEntry } from './timestamps.js';
 import {
   getTimestamp,
-  TS_NODE, TS_CHILDREN, TS_TEXT,
+  TS_NODE, TS_CHILDREN, TS_TEXT, TS_TREE,
   tsAttrName, tsStylePropName,
 } from './timestamps.js';
 
@@ -25,6 +25,7 @@ export interface NodeManifestEntry {
   [TS_NODE]?: number;
   [TS_CHILDREN]?: number;
   [TS_TEXT]?: number;
+  [TS_TREE]?: number;
   /** Per-attribute timestamps: key = tsAttrName(attrName) */
   attrs: Map<string, number>;
   /** Per-style-property timestamps: key = tsStylePropName(prop) */
@@ -179,6 +180,7 @@ export function buildManifest(subtreeRoot: Element): TimestampManifest {
       if (name === TS_NODE) entry[TS_NODE] = value;
       else if (name === TS_CHILDREN) entry[TS_CHILDREN] = value;
       else if (name === TS_TEXT) entry[TS_TEXT] = value;
+      else if (name === TS_TREE) entry[TS_TREE] = value;
       else if (name.startsWith('data-z10-ts-a-style-')) entry.styleProps.set(name, value);
       else if (name.startsWith('data-z10-ts-a-')) entry.attrs.set(name, value);
     }

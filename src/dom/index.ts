@@ -70,3 +70,11 @@ export { reconcileChildren } from './reconcile.js';
 
 // A17. Metadata stripping
 export { stripForAgent, stripForExport } from './strip.js';
+
+// B1-B4. Local Proxy
+export {
+  LocalProxy,
+  type LocalProxyOptions,
+  type ReadTicket, type SubtreeResult, type RefreshResult,
+  type SubmitResult, type SubmitSuccess, type SubmitRejected,
+} from './proxy.js';
