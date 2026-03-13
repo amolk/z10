@@ -20,7 +20,7 @@
 import * as acorn from 'acorn';
 import { Window } from 'happy-dom';
 import { createContext, runInContext, type Context } from 'node:vm';
-import { loadSession } from './session.js';
+import { loadSession, resolvePageId, extractFlag } from './session.js';
 import { computeChecksum } from './checksum.js';
 import { execScriptStream } from './api.js';
 
@@ -266,7 +266,7 @@ export function runExecOffline(source: string, options: ExecOptions = {}): {
 }
 
 /**
- * CLI entry point for `z10 exec`.
+ * CLI entry point for `z10 exec [--project <id>] [--page <id>] [--offline]`.
  * Reads JavaScript from stdin and executes it.
  *
  * Online: sends script to server, reads streaming per-statement results.
@@ -275,6 +275,11 @@ export function runExecOffline(source: string, options: ExecOptions = {}): {
 export async function cmdExec(args: string[]): Promise<void> {
   const session = await loadSession();
   const offline = args.includes('--offline');
+
+  // Resolve project/page from flags or session
+  const projectIdFromFlag = extractFlag(args, '--project');
+  const projectId = projectIdFromFlag ?? session.currentProjectId;
+  const pageId = resolvePageId(args, session);
 
   // Read stdin
   const chunks: Buffer[] = [];
@@ -291,7 +296,7 @@ export async function cmdExec(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  const online = !offline && !!session.currentProjectId;
+  const online = !offline && !!projectId;
 
   if (online) {
     // Stream to server — server parses, executes per-statement, streams results
@@ -301,9 +306,9 @@ export async function cmdExec(args: string[]): Promise<void> {
       let finalChecksum = '';
 
       for await (const event of execScriptStream(
-        session.currentProjectId!,
+        projectId!,
         source,
-        session.currentPageId,
+        pageId,
       )) {
         if (event.type === 'result') {
           totalStatements++;
@@ -329,7 +334,7 @@ export async function cmdExec(args: string[]): Promise<void> {
         const { saveDomCache, updateSession } = await import('./session.js');
         const { fetchDom } = await import('./api.js');
         try {
-          const dom = await fetchDom(session.currentProjectId!);
+          const dom = await fetchDom(projectId!);
           await saveDomCache(dom.html);
           await updateSession({ domChecksum: dom.checksum });
         } catch {
@@ -359,7 +364,7 @@ export async function cmdExec(args: string[]): Promise<void> {
   const { results, finalHtml, success } = runExecOffline(source, {
     offline: true,
     initialHtml,
-    pageRootId: session.currentPageId,
+    pageRootId: pageId,
   });
 
   // Save updated DOM cache

@@ -95,9 +95,9 @@ async function main(): Promise<void> {
       if (args[1] === 'load') {
         await cmdPageLoad(args.slice(2));
       } else if (args[1] === 'list') {
-        await cmdPageList();
+        await cmdPageList(args.slice(2));
       } else {
-        console.error('Usage: z10 page <list|load <page-id>>');
+        console.error('Usage: z10 page <list [--project <id>]|load <page-id>>');
         process.exit(1);
       }
       break;
@@ -328,12 +328,16 @@ Agent Scripting:
   z10 logout                 Clear authentication
   z10 project list           List all projects
   z10 project load <id>      Set current project context
-  z10 page list              List pages in current project
+  z10 page list [--project]  List pages in project
   z10 page load <id>         Set current page context
-  z10 dom [--full]           Show current page DOM tree
-  z10 exec                   Execute JavaScript from stdin
-  z10 components             List registered Web Components
-  z10 tokens                 List design tokens
+  z10 dom [--full] [flags]   Show current page DOM tree
+  z10 exec [flags]           Execute JavaScript from stdin
+  z10 components [--project] List registered Web Components
+  z10 tokens [--project]     List design tokens
+
+Inline Flags (override session state):
+  --project <id>             Use specific project (skip 'project load')
+  --page <id>                Use specific page (skip 'page load')
 
   z10 --version              Show version
   z10 --help                 Show this help

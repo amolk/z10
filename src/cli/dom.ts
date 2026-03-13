@@ -8,10 +8,11 @@
  */
 
 import { Window, type HTMLElement as HappyElement } from 'happy-dom';
-import { loadSession, saveDomCache, updateSession, requireSession } from './session.js';
-import { loadDomCache } from './session.js';
+import { loadSession, saveDomCache, updateSession, resolvePageId } from './session.js';
+import { loadDomCache, extractFlag } from './session.js';
 import { fetchDom } from './api.js';
 import { computeChecksum } from './checksum.js';
+import { resolveProjectId } from './session.js';
 
 /** Tags to skip in tree/full output */
 const SKIP_TAGS = new Set(['SCRIPT', 'STYLE']);
@@ -96,28 +97,33 @@ export function compactTreeView(html: string, pageId?: string): string {
 }
 
 /**
- * CLI entry point for `z10 dom`.
+ * CLI entry point for `z10 dom [--project <id>] [--page <id>] [--full] [--offline]`.
  */
 export async function cmdDom(args: string[]): Promise<void> {
   const full = args.includes('--full');
   const offline = args.includes('--offline');
   const session = await loadSession();
 
-  if (!offline && session.currentProjectId) {
+  // Resolve project/page from flags or session
+  const projectIdFromFlag = extractFlag(args, '--project');
+  const projectId = projectIdFromFlag ?? session.currentProjectId;
+  const pageId = resolvePageId(args, session);
+
+  if (!offline && projectId) {
     // Online mode: fetch full DOM for caching, then filter to current page for display
     try {
-      const raw = await fetchDom(session.currentProjectId);
+      const raw = await fetchDom(projectId);
 
       await saveDomCache(raw.html);
       await updateSession({ domChecksum: raw.checksum });
 
       if (full) {
-        const display = session.currentPageId
-          ? `<body>\n${extractPageInner(raw.html, session.currentPageId)}\n</body>`
+        const display = pageId
+          ? `<body>\n${extractPageInner(raw.html, pageId)}\n</body>`
           : raw.html;
         console.log(display.replace(/\n{3,}/g, '\n\n'));
       } else {
-        console.log(compactTreeView(raw.html, session.currentPageId ?? undefined));
+        console.log(compactTreeView(raw.html, pageId));
       }
       return;
     } catch (err) {
@@ -130,16 +136,16 @@ export async function cmdDom(args: string[]): Promise<void> {
   // Offline mode or fallback: use cached DOM
   const cached = await loadDomCache();
   if (!cached) {
-    console.error('No cached DOM. Run `z10 project load <id>` first or connect to server.');
+    console.error('No cached DOM. Run `z10 project load <id>` or use --project <id>.');
     process.exit(1);
   }
 
   if (full) {
-    const display = session.currentPageId
-      ? `<body>\n${extractPageInner(cached, session.currentPageId)}\n</body>`
+    const display = pageId
+      ? `<body>\n${extractPageInner(cached, pageId)}\n</body>`
       : cached;
     console.log(display.replace(/\n{3,}/g, '\n\n'));
   } else {
-    console.log(compactTreeView(cached, session.currentPageId ?? undefined));
+    console.log(compactTreeView(cached, pageId));
   }
 }

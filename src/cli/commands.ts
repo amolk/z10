@@ -4,7 +4,7 @@
  * Commands: login, project load, page load, components, tokens
  */
 
-import { loadSession, updateSession, clearSession, requireSession } from './session.js';
+import { loadSession, updateSession, clearSession, requireSession, resolveProjectId, resolvePageId } from './session.js';
 import { fetchComponents, fetchTokens, fetchDom, fetchProjects, fetchPages } from './api.js';
 import { saveDomCache } from './session.js';
 
@@ -98,12 +98,11 @@ export async function cmdProjectList(): Promise<void> {
 }
 
 /**
- * z10 page list — List pages in the current project.
+ * z10 page list [--project <id>] — List pages in the current project.
  */
-export async function cmdPageList(): Promise<void> {
+export async function cmdPageList(args: string[] = []): Promise<void> {
   const session = await loadSession();
-  const projectId = requireSession(session, 'currentProjectId',
-    'No project loaded. Run `z10 project load <id>` first.');
+  const projectId = resolveProjectId(args, session);
 
   try {
     const pages = await fetchPages(projectId);
@@ -152,12 +151,11 @@ export async function cmdPageLoad(args: string[]): Promise<void> {
 }
 
 /**
- * z10 components — List registered Web Components.
+ * z10 components [--project <id>] — List registered Web Components.
  */
 export async function cmdComponents(args: string[]): Promise<void> {
   const session = await loadSession();
-  const projectId = requireSession(session, 'currentProjectId',
-    'No project loaded. Run `z10 project load <id>` first.');
+  const projectId = resolveProjectId(args, session);
 
   try {
     const components = await fetchComponents(projectId);
@@ -179,12 +177,11 @@ export async function cmdComponents(args: string[]): Promise<void> {
 }
 
 /**
- * z10 tokens — List design tokens.
+ * z10 tokens [--project <id>] — List design tokens.
  */
 export async function cmdTokens(args: string[]): Promise<void> {
   const session = await loadSession();
-  const projectId = requireSession(session, 'currentProjectId',
-    'No project loaded. Run `z10 project load <id>` first.');
+  const projectId = resolveProjectId(args, session);
 
   try {
     const tokens = await fetchTokens(projectId);

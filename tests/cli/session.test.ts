@@ -6,6 +6,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { readFile, rm, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { extractFlag, resolvePageId } from '../../src/cli/session.js';
+import type { SessionState } from '../../src/cli/session.js';
 
 // We test the core logic by importing the functions and mocking the paths
 // Since session.ts uses homedir(), we test the serialization logic directly
@@ -63,5 +65,40 @@ describe('session state serialization', () => {
 
     const loaded = await readFile(domCacheFile, 'utf-8');
     expect(loaded).toBe(html);
+  });
+});
+
+describe('extractFlag', () => {
+  it('extracts flag value from args', () => {
+    expect(extractFlag(['--project', 'abc', '--page', 'p1'], '--project')).toBe('abc');
+    expect(extractFlag(['--project', 'abc', '--page', 'p1'], '--page')).toBe('p1');
+  });
+
+  it('returns undefined when flag is absent', () => {
+    expect(extractFlag(['--full', '--offline'], '--project')).toBeUndefined();
+  });
+
+  it('returns undefined when flag has no value', () => {
+    expect(extractFlag(['--project'], '--project')).toBeUndefined();
+  });
+
+  it('handles flag at end of args with no value', () => {
+    expect(extractFlag(['--full', '--project'], '--project')).toBeUndefined();
+  });
+});
+
+describe('resolvePageId', () => {
+  it('prefers --page flag over session', () => {
+    const session: SessionState = { currentPageId: 'from-session' };
+    expect(resolvePageId(['--page', 'from-flag'], session)).toBe('from-flag');
+  });
+
+  it('falls back to session when no flag', () => {
+    const session: SessionState = { currentPageId: 'from-session' };
+    expect(resolvePageId([], session)).toBe('from-session');
+  });
+
+  it('returns undefined when neither flag nor session', () => {
+    expect(resolvePageId([], {})).toBeUndefined();
   });
 });
