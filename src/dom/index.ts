@@ -26,3 +26,25 @@ export { bootstrapDocument, type BootstrapOptions } from './bootstrap.js';
 
 // A12. Node ID assignment
 export { assignNodeIds, createIdGenerator } from './node-ids.js';
+
+// A5. Write set builder
+export { buildWriteSet } from './write-set.js';
+
+// A8. Illegal modification check
+export { checkIllegalModifications, type IllegalModification } from './checks.js';
+
+// A13. Subtree locking
+export { SubtreeLockManager } from './locks.js';
+
+// A14. Patch serialization
+export {
+  serializeMutationsToOps, createPatchEnvelope,
+  type PatchOp, type AttrOp, type StyleOp, type TextOp, type AddOp, type RemoveOp,
+  type PatchEnvelope,
+} from './patch-serialize.js';
+
+// A15. Patch replay
+export { replayPatch } from './patch-replay.js';
+
+// A16. Patch ring buffer
+export { PatchRingBuffer } from './patch-buffer.js';

@@ -36,13 +36,13 @@ No backwards compat: this is a new `src/dom/` module. Does NOT extend the existi
 
 ### A.2 Transaction Pipeline
 
-- [ ] **A5. Write set builder** — `buildWriteSet(mutationRecords)` → array of `{nid, facet, property?, attribute?}`. Facets: structural, children, text, attribute, style-property. Uses A3 style utilities for style attr decomposition. Deduplication. (§5.2 Step 8)
+- [x] **A5. Write set builder** — `buildWriteSet(mutationRecords)` → array of `{nid, facet, property?, attribute?}`. Facets: structural, children, text, attribute, style-property. Uses A3 style utilities for style attr decomposition. Deduplication. (§5.2 Step 8)
 
 - [ ] **A6. Per-facet validator** — `validate(writeSet, manifest, liveDOM)` → conflicts array. Check each write-set entry against live DOM timestamps. No `data-z10-ts-tree` for validation (only for fast pre-check). Returns typed conflict objects per §4.1–4.6. (§5.2 Step 9)
 
 - [ ] **A7. Sandbox execution context** — Build the scoped `document` proxy that agent code executes against: `querySelector`, `querySelectorAll`, `getElementById`, `createElement`, `createTextNode` — all bound to the sandbox clone. Code runs as a single block via `node:vm` (`createContext`/`runInContext`). No acorn parsing, no statement splitting, no var rewriting — this replaces the current `src/cli/exec.ts` approach entirely. Node-only (server + CLI). Browser-side human edits generate JS code strings but execute through a separate in-browser path (see D4). (§5.2 Step 4, Step 6)
 
-- [ ] **A8. Illegal modification check** — Scan MutationRecords for any change to `data-z10-id` or `data-z10-ts-*` attributes. Reject transaction if found. (§5.2 Step 7)
+- [x] **A8. Illegal modification check** — Scan MutationRecords for any change to `data-z10-id` or `data-z10-ts-*` attributes. Reject transaction if found. (§5.2 Step 7)
 
 - [ ] **A9. Transaction engine** — Orchestrates the full lifecycle: acquire subtree lock → fast pre-check `data-z10-ts-tree` → clone subtree → attach MutationObserver → prepare sandbox context (A7) → execute code → disconnect observer → check illegal mods (A8) → build write set (A5) → validate (A6) → commit or reject. (§5.1–5.6)
 
@@ -52,15 +52,15 @@ No backwards compat: this is a new `src/dom/` module. Does NOT extend the existi
 
 - [x] **A12. Node ID assignment** — `assignNodeIds(root, idGenerator)`: walk a subtree, assign `data-z10-id` to elements that lack one, set initial `data-z10-ts-*`. Called during commit for newly created nodes (A11) and during bootstrap (A4). Share the logic. (§2.2, §14.1)
 
-- [ ] **A13. Subtree locking** — Per-subtree locks with overlap detection (is one root an ancestor of the other?). Non-overlapping = parallel, overlapping = serialized queue. 5s timeout → abort. Document-level lock for administrative ops that blocks all other transactions. (§5.7, §14.7)
+- [x] **A13. Subtree locking** — Per-subtree locks with overlap detection (is one root an ancestor of the other?). Non-overlapping = parallel, overlapping = serialized queue. 5s timeout → abort. Document-level lock for administrative ops that blocks all other transactions. (§5.7, §14.7)
 
 ### A.3 Patches
 
-- [ ] **A14. Patch serialization** — `serializeMutationsToOps(records)` → op array. 5 op types: `attr`, `style`, `text`, `add`, `remove`. Style attr changes decomposed into per-property `style` ops using A3 utilities. Structural ops (`add`, `remove`) preserve MutationObserver ordering. Patch envelope: `{txId, timestamp, ops}`. (§6.1–6.5)
+- [x] **A14. Patch serialization** — `serializeMutationsToOps(records)` → op array. 5 op types: `attr`, `style`, `text`, `add`, `remove`. Style attr changes decomposed into per-property `style` ops using A3 utilities. Structural ops (`add`, `remove`) preserve MutationObserver ordering. Patch envelope: `{txId, timestamp, ops}`. (§6.1–6.5)
 
-- [ ] **A15. Patch replay** — `replayPatch(ops, rootElement)` function. Handles all 5 op types. Nodes addressed by `data-z10-id` via `querySelector`. Must work identically in happy-dom and browser DOM — **this is the single function shared by server, CLI, and web UI**. (§7.3)
+- [x] **A15. Patch replay** — `replayPatch(ops, rootElement)` function. Handles all 5 op types. Nodes addressed by `data-z10-id` via `querySelector`. Must work identically in happy-dom and browser DOM — **this is the single function shared by server, CLI, and web UI**. (§7.3)
 
-- [ ] **A16. Patch ring buffer** — Ordered log of committed patches keyed by `txId`. Configurable capacity (default 1000). Lookup by range: `getPatches(afterTxId)` → array. (§5.1, §7.4)
+- [x] **A16. Patch ring buffer** — Ordered log of committed patches keyed by `txId`. Configurable capacity (default 1000). Lookup by range: `getPatches(afterTxId)` → array. (§5.1, §7.4)
 
 ### A.4 Stripping + Cross-Context Verification
 
