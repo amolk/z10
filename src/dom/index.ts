@@ -48,3 +48,25 @@ export { replayPatch } from './patch-replay.js';
 
 // A16. Patch ring buffer
 export { PatchRingBuffer } from './patch-buffer.js';
+
+// A6. Per-facet validator
+export {
+  validate, preCheckTreeTimestamp, buildManifest,
+  type TimestampManifest, type NodeManifestEntry, type Conflict,
+} from './validator.js';
+
+// A7. Sandbox execution context
+export { createSandboxContext, executeSandboxCode, type SandboxResult } from './sandbox.js';
+
+// A9. Transaction engine + A10. Commit procedure
+export {
+  TransactionEngine,
+  type TransactionResult, type TransactionCommitted, type TransactionRejected,
+  type TransactionEngineOptions,
+} from './transaction.js';
+
+// A11. Reconcile children
+export { reconcileChildren } from './reconcile.js';
+
+// A17. Metadata stripping
+export { stripForAgent, stripForExport } from './strip.js';

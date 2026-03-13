@@ -38,17 +38,17 @@ No backwards compat: this is a new `src/dom/` module. Does NOT extend the existi
 
 - [x] **A5. Write set builder** — `buildWriteSet(mutationRecords)` → array of `{nid, facet, property?, attribute?}`. Facets: structural, children, text, attribute, style-property. Uses A3 style utilities for style attr decomposition. Deduplication. (§5.2 Step 8)
 
-- [ ] **A6. Per-facet validator** — `validate(writeSet, manifest, liveDOM)` → conflicts array. Check each write-set entry against live DOM timestamps. No `data-z10-ts-tree` for validation (only for fast pre-check). Returns typed conflict objects per §4.1–4.6. (§5.2 Step 9)
+- [x] **A6. Per-facet validator** — `validate(writeSet, manifest, liveDOM)` → conflicts array. Check each write-set entry against live DOM timestamps. No `data-z10-ts-tree` for validation (only for fast pre-check). Returns typed conflict objects per §4.1–4.6. (§5.2 Step 9)
 
-- [ ] **A7. Sandbox execution context** — Build the scoped `document` proxy that agent code executes against: `querySelector`, `querySelectorAll`, `getElementById`, `createElement`, `createTextNode` — all bound to the sandbox clone. Code runs as a single block via `node:vm` (`createContext`/`runInContext`). No acorn parsing, no statement splitting, no var rewriting — this replaces the current `src/cli/exec.ts` approach entirely. Node-only (server + CLI). Browser-side human edits generate JS code strings but execute through a separate in-browser path (see D4). (§5.2 Step 4, Step 6)
+- [x] **A7. Sandbox execution context** — Build the scoped `document` proxy that agent code executes against: `querySelector`, `querySelectorAll`, `getElementById`, `createElement`, `createTextNode` — all bound to the sandbox clone. Code runs as a single block via `node:vm` (`createContext`/`runInContext`). No acorn parsing, no statement splitting, no var rewriting — this replaces the current `src/cli/exec.ts` approach entirely. Node-only (server + CLI). Browser-side human edits generate JS code strings but execute through a separate in-browser path (see D4). (§5.2 Step 4, Step 6)
 
 - [x] **A8. Illegal modification check** — Scan MutationRecords for any change to `data-z10-id` or `data-z10-ts-*` attributes. Reject transaction if found. (§5.2 Step 7)
 
-- [ ] **A9. Transaction engine** — Orchestrates the full lifecycle: acquire subtree lock → fast pre-check `data-z10-ts-tree` → clone subtree → attach MutationObserver → prepare sandbox context (A7) → execute code → disconnect observer → check illegal mods (A8) → build write set (A5) → validate (A6) → commit or reject. (§5.1–5.6)
+- [x] **A9. Transaction engine** — Orchestrates the full lifecycle: acquire subtree lock → fast pre-check `data-z10-ts-tree` → clone subtree → attach MutationObserver → prepare sandbox context (A7) → execute code → disconnect observer → check illegal mods (A8) → build write set (A5) → validate (A6) → commit or reject. (§5.1–5.6)
 
-- [ ] **A10. Commit procedure** — On validation pass: increment clock, attach live DOM observer, apply changes from sandbox final state to live DOM (attributes, style-properties, text, children via `reconcileChildren`), bump timestamps (A2), bubble `data-z10-ts-tree`, disconnect observer, serialize patch (A14), store in ring buffer (A16). (§5.3)
+- [x] **A10. Commit procedure** — On validation pass: increment clock, attach live DOM observer, apply changes from sandbox final state to live DOM (attributes, style-properties, text, children via `reconcileChildren`), bump timestamps (A2), bubble `data-z10-ts-tree`, disconnect observer, serialize patch (A14), store in ring buffer (A16). (§5.3)
 
-- [ ] **A11. `reconcileChildren(sandboxParent, liveParent, ts)`** — Match children by `data-z10-id`. Existing: reorder/update in place. New (no `data-z10-id`): clone from sandbox, assign fresh `data-z10-id`, set initial `data-z10-ts-*`. Missing (in live but not sandbox): remove. Non-trivial function — needs its own tests. (§5.3)
+- [x] **A11. `reconcileChildren(sandboxParent, liveParent, ts)`** — Match children by `data-z10-id`. Existing: reorder/update in place. New (no `data-z10-id`): clone from sandbox, assign fresh `data-z10-id`, set initial `data-z10-ts-*`. Missing (in live but not sandbox): remove. Non-trivial function — needs its own tests. (§5.3)
 
 - [x] **A12. Node ID assignment** — `assignNodeIds(root, idGenerator)`: walk a subtree, assign `data-z10-id` to elements that lack one, set initial `data-z10-ts-*`. Called during commit for newly created nodes (A11) and during bootstrap (A4). Share the logic. (§2.2, §14.1)
 
@@ -64,7 +64,7 @@ No backwards compat: this is a new `src/dom/` module. Does NOT extend the existi
 
 ### A.4 Stripping + Cross-Context Verification
 
-- [ ] **A17. Metadata stripping** — Two functions: (1) `stripForAgent(root)` — clone, remove `data-z10-ts-*`, retain `data-z10-id`. For proxy/CLI serving agent reads. (2) `stripForExport(root)` — clone, remove both `data-z10-id` and `data-z10-ts-*`. For export, copy, publish. Both run on clones, never on live DOM. (§8.3, §11)
+- [x] **A17. Metadata stripping** — Two functions: (1) `stripForAgent(root)` — clone, remove `data-z10-ts-*`, retain `data-z10-id`. For proxy/CLI serving agent reads. (2) `stripForExport(root)` — clone, remove both `data-z10-id` and `data-z10-ts-*`. For export, copy, publish. Both run on clones, never on live DOM. (§8.3, §11)
 
 - [ ] **A18. Cross-context verification test** — Write a test that runs `replayPatch` and the transaction engine against both happy-dom and browser DOM (jsdom or happy-dom browser compat mode) to confirm identical behavior. Surface any API divergence (e.g., `MutationObserver` differences, `cloneNode` behavior, `style` attribute handling) before Phases B–D build on this assumption. This is a key architectural invariant: one module, three consumers.
 
