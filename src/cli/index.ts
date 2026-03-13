@@ -13,6 +13,16 @@
  *   z10 sync --design <file>   Check design file sync status
  *   z10 export <file>          Export to React + Tailwind code
  *   z10 config <file> [key] [value]  Get/set config values
+ *
+ * Agent Scripting Commands:
+ *   z10 login --token <token>  Authenticate with z10 server
+ *   z10 logout                 Clear authentication
+ *   z10 project load <id>      Set current project context
+ *   z10 page load <id>         Set current page context
+ *   z10 dom [--full]           Show current page DOM
+ *   z10 exec                   Execute JavaScript from stdin
+ *   z10 components             List registered Web Components
+ *   z10 tokens                 List design tokens
  */
 
 import { readFile, writeFile } from 'node:fs/promises';
@@ -26,6 +36,9 @@ import { getConfigValue, setConfigValue, CONFIG_KEYS } from '../core/config.js';
 import { exportReact } from '../export/react.js';
 import { exportVue } from '../export/vue.js';
 import { exportSvelte } from '../export/svelte.js';
+import { cmdLogin, cmdLogout, cmdProjectLoad, cmdPageLoad, cmdComponents, cmdTokens as cmdTokensList } from './commands.js';
+import { cmdExec } from './exec.js';
+import { cmdDom } from './dom.js';
 import type { ProjectConfig } from '../core/types.js';
 
 const args = process.argv.slice(2);
@@ -59,6 +72,40 @@ async function main(): Promise<void> {
       break;
     case 'export':
       await cmdExport();
+      break;
+    case 'login':
+      await cmdLogin(args.slice(1));
+      break;
+    case 'logout':
+      await cmdLogout();
+      break;
+    case 'project':
+      if (args[1] === 'load') {
+        await cmdProjectLoad(args.slice(2));
+      } else {
+        console.error('Usage: z10 project load <project-id>');
+        process.exit(1);
+      }
+      break;
+    case 'page':
+      if (args[1] === 'load') {
+        await cmdPageLoad(args.slice(2));
+      } else {
+        console.error('Usage: z10 page load <page-id>');
+        process.exit(1);
+      }
+      break;
+    case 'dom':
+      await cmdDom(args.slice(1));
+      break;
+    case 'exec':
+      await cmdExec(args.slice(1));
+      break;
+    case 'components':
+      await cmdComponents(args.slice(1));
+      break;
+    case 'tokens':
+      await cmdTokensList(args.slice(1));
       break;
     case '--help':
     case '-h':
@@ -259,29 +306,36 @@ Usage:
   z10 serve [file]           Start the MCP server (default port 29910)
   z10 new [name]             Create a new .z10.html file
   z10 info <file>            Show document summary
-  z10 export <file> [--format react|vue|svelte] [--id <id>] [--out <file>] [--js]  Export code
-  z10 config <file> [key] [value]  Get/set project configuration
-  z10 branch [name]          Create/list design branches (z10/ prefixed)
-  z10 diff <ref1>..<ref2>    Semantic diff of .z10.html between Git refs
-  z10 merge <branch> [--into <target>]  Merge a design branch
-  z10 sync --design <file> [--source <dir>]  Check design file status
+  z10 export <file> [opts]   Export to React/Vue/Svelte code
+  z10 config <file> [k] [v]  Get/set project configuration
+  z10 branch [name]          Create/list design branches
+  z10 diff <ref1>..<ref2>    Semantic diff between Git refs
+  z10 merge <branch>         Merge a design branch
+  z10 sync --design <file>   Check design file status
+
+Agent Scripting:
+  z10 login --token <token>  Authenticate with z10 server
+  z10 logout                 Clear authentication
+  z10 project load <id>      Set current project context
+  z10 page load <id>         Set current page context
+  z10 dom [--full]           Show current page DOM tree
+  z10 exec                   Execute JavaScript from stdin
+  z10 components             List registered Web Components
+  z10 tokens                 List design tokens
+
   z10 --version              Show version
   z10 --help                 Show this help
 
+Agent Workflow:
+  z10 login --token <your-token>
+  z10 project load <project-id>
+  z10 exec <<'EOF'
+  const nav = document.getElementById('left-nav');
+  nav.appendChild(document.createElement('div'));
+  EOF
+
 MCP Connection:
   claude mcp add zero10 --transport http http://127.0.0.1:29910/mcp --scope user
-
-Examples:
-  z10 new "My App"                         Create my-app.z10.html
-  z10 serve my-app.z10.html                Start server with file
-  z10 info my-app.z10.html                 Show document info
-  z10 config app.z10.html                  Show all config values
-  z10 config app.z10.html governance       Get governance level
-  z10 config app.z10.html governance scoped-edit  Set governance
-  z10 branch "dark-mode-exploration"       Create a design branch
-  z10 diff main..z10/dark-mode-exploration Semantic diff between branches
-  z10 merge dark-mode-exploration --into main
-  z10 sync --design app.z10.html           Check design status
 `.trim());
 }
 
