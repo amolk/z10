@@ -9,11 +9,11 @@ _Replace MCP-based agent workflow with CLI + JS execution. See `dev/agent-script
 
 - [x] CLI scaffold (`cli/`) — Node.js CLI with commander/yargs, commands: `login`, `project load`, `page load`, `dom`, `exec`, `components`, `tokens`. Session state in `~/.z10/`
 - [x] CLI `exec` command — read stdin JS, incremental statement parsing (acorn), execute in happy-dom with Web Component support, inject `z10` global, stdout per-statement results, exit on error
-- [ ] CLI server communication — HTTP client for z10 API, auth token management, send statements to server, receive + compare checksums, fetch DOM state
+- [x] CLI server communication — HTTP client for z10 API, auth token management, send statements to server, receive + compare checksums, fetch DOM state
 - [ ] Server API endpoints — `POST /api/projects/:id/exec` (execute JS statement), `GET /api/projects/:id/dom` (HTML + checksum, compact mode), governance enforcement
-- [ ] Checksum sync — compute from happy-dom state, compare with server per statement, `STALE_DOM` error on mismatch, `z10 dom` refreshes local copy
-- [ ] z10 Skill file — setup instructions, command reference, DOM API reference, Web Component patterns, `z10.setTokens()`, data attributes, examples, error recovery
-- [ ] MCP fallback — `z10_exec` MCP tool for non-CLI agents, batch mode (no streaming), accepts full JS code string
+- [x] Checksum sync — compute from happy-dom state, compare with server per statement, `STALE_DOM` error on mismatch, `z10 dom` refreshes local copy
+- [x] z10 Skill file — setup instructions, command reference, DOM API reference, Web Component patterns, `z10.setTokens()`, data attributes, examples, error recovery
+- [x] MCP fallback — `z10_exec` MCP tool for non-CLI agents, batch mode (no streaming), accepts full JS code string
 - [ ] Tests — statement parsing, exec flow, stdout format, exit codes, happy-dom DOM + Web Components, checksum sync, server API, governance, integration, skill validation
 
 ---

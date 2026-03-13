@@ -24,6 +24,10 @@ import {
 import { exportReact } from '../export/react.js';
 import { exportVue } from '../export/vue.js';
 import { exportSvelte } from '../export/svelte.js';
+import { parseStatements, createExecEnvironment, executeStatement, summarizeStatement } from '../cli/exec.js';
+import { serializeZ10Html } from '../format/serializer.js';
+import { parseZ10Html } from '../format/parser.js';
+import { computeChecksum } from '../cli/checksum.js';
 
 // ---------------------------------------------------------------------------
 // Tool Schemas (JSON Schema format for MCP)
@@ -367,6 +371,17 @@ export const UTILITY_TOOLS: ToolDefinition[] = [
       required: [],
     },
   },
+  {
+    name: 'z10_exec',
+    description: 'Execute JavaScript code against the design document DOM. Batch mode — accepts full JS source, executes all statements, returns results. Use standard DOM APIs (querySelector, createElement, appendChild, etc.) and the z10 global (z10.setTokens). For non-CLI agents that cannot use stdin piping.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', description: 'JavaScript code to execute against the document DOM. Use standard DOM APIs.' },
+      },
+      required: ['code'],
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -420,6 +435,8 @@ export function handleUtilityTool(doc: Z10Document, name: string, args: ToolArgs
       return handleFindPlacement(doc, args);
     case 'reconcile':
       return handleReconcile(doc, args);
+    case 'z10_exec':
+      return handleZ10Exec(doc, args);
     default:
       return JSON.stringify({ error: `Unknown utility tool: ${name}` });
   }
@@ -1037,4 +1054,89 @@ function handleReconcile(doc: Z10Document, args: ToolArgs): string {
   };
 
   return JSON.stringify(result, null, 2);
+}
+
+// ---------------------------------------------------------------------------
+// z10_exec — JavaScript execution via MCP (batch mode)
+// ---------------------------------------------------------------------------
+
+/**
+ * Execute JavaScript code against the document DOM.
+ * This is the MCP fallback for agents that can't use the CLI.
+ * Operates in batch mode: all statements execute, results returned at once.
+ */
+function handleZ10Exec(doc: Z10Document, args: ToolArgs): string {
+  const code = args['code'] as string;
+  if (!code || typeof code !== 'string') {
+    return JSON.stringify({ error: 'Missing required parameter: code' });
+  }
+
+  // Parse the code into statements
+  let statements: string[];
+  try {
+    statements = parseStatements(code);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return JSON.stringify({ error: msg, statements: 0 });
+  }
+
+  if (statements.length === 0) {
+    return JSON.stringify({ error: 'No statements to execute', statements: 0 });
+  }
+
+  // Serialize current doc to HTML for the exec environment
+  const currentHtml = serializeZ10Html(doc);
+  const { context, getHtml } = createExecEnvironment(currentHtml);
+
+  const results: Array<{
+    statement: string;
+    success: boolean;
+    error?: string;
+  }> = [];
+
+  for (const stmt of statements) {
+    const execResult = executeStatement(stmt, context);
+    const summary = summarizeStatement(stmt);
+
+    if (!execResult.success) {
+      results.push({
+        statement: summary,
+        success: false,
+        error: execResult.error,
+      });
+      // Stop on first error (fail-fast)
+      const finalChecksum = computeChecksum(getHtml());
+      return JSON.stringify({
+        success: false,
+        results,
+        statementsExecuted: results.length,
+        statementsTotal: statements.length,
+        checksum: finalChecksum,
+      }, null, 2);
+    }
+
+    results.push({ statement: summary, success: true });
+  }
+
+  // Apply the final DOM state back to the document
+  const finalHtml = getHtml();
+  const finalChecksum = computeChecksum(finalHtml);
+
+  // Re-parse the modified HTML back into the document
+  try {
+    const updatedDoc = parseZ10Html(`<!DOCTYPE html><html><head></head><body>${finalHtml}</body></html>`);
+    // Merge updated nodes into the current document
+    doc.nodes = updatedDoc.nodes;
+  } catch {
+    // If re-parse fails, report success but note the sync issue
+  }
+
+  return JSON.stringify({
+    success: true,
+    results,
+    statementsExecuted: results.length,
+    statementsTotal: statements.length,
+    checksum: finalChecksum,
+    html: finalHtml,
+  }, null, 2);
 }

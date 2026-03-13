@@ -20,7 +20,8 @@ import * as acorn from 'acorn';
 import { Window } from 'happy-dom';
 import { createContext, runInContext, type Context } from 'node:vm';
 import { loadSession } from './session.js';
-import { computeChecksum } from './checksum.js';
+import { computeChecksum, checksumsMatch } from './checksum.js';
+import { execStatement as sendToServer } from './api.js';
 
 export interface ExecOptions {
   /** Skip server sync (local-only mode) */
@@ -152,7 +153,14 @@ export function summarizeStatement(statement: string): string {
 }
 
 /**
- * Run the full exec pipeline: parse stdin, execute statements, sync.
+ * Run the full exec pipeline: parse stdin, execute statements, sync with server.
+ *
+ * For each statement:
+ * 1. Execute locally in happy-dom
+ * 2. Compute local checksum
+ * 3. If online: send to server, compare checksums
+ * 4. On checksum mismatch: emit STALE_DOM error, exit
+ * 5. Print ✓ or ✗ to stdout
  */
 export async function runExec(source: string, options: ExecOptions = {}): Promise<{
   results: StatementResult[];
@@ -163,29 +171,68 @@ export async function runExec(source: string, options: ExecOptions = {}): Promis
   const results: StatementResult[] = [];
 
   const { context, getHtml } = createExecEnvironment(options.initialHtml);
+  const online = !options.offline && !!options.projectId;
 
   for (const stmt of statements) {
-    const execResult = executeStatement(stmt, context);
+    const localExec = executeStatement(stmt, context);
     const html = getHtml();
-    const checksum = computeChecksum(html);
+    const localChecksum = computeChecksum(html);
 
-    if (!execResult.success) {
+    if (!localExec.success) {
       const result: StatementResult = {
         statement: summarizeStatement(stmt),
         success: false,
-        error: execResult.error,
-        checksum,
+        error: localExec.error,
+        checksum: localChecksum,
       };
       results.push(result);
       console.log(`✗ ${result.statement}`);
-      console.error(`  ERROR: ${execResult.error}`);
+      console.error(`  ERROR: ${localExec.error}`);
       return { results, finalHtml: html, success: false };
+    }
+
+    // Server sync: send statement and compare checksums
+    if (online) {
+      try {
+        const serverResult = await sendToServer(options.projectId!, stmt, localChecksum);
+
+        if (!serverResult.success) {
+          const result: StatementResult = {
+            statement: summarizeStatement(stmt),
+            success: false,
+            error: serverResult.error ?? 'Server execution failed',
+            checksum: localChecksum,
+          };
+          results.push(result);
+          console.log(`✗ ${result.statement}`);
+          console.error(`  ERROR: ${serverResult.error}`);
+          return { results, finalHtml: html, success: false };
+        }
+
+        if (!checksumsMatch(localChecksum, serverResult.checksum)) {
+          const result: StatementResult = {
+            statement: summarizeStatement(stmt),
+            success: false,
+            error: 'STALE_DOM: Local and server DOM have diverged. Run `z10 dom` to refresh.',
+            checksum: localChecksum,
+          };
+          results.push(result);
+          console.log(`✗ ${result.statement}`);
+          console.error('  ERROR: STALE_DOM — local and server checksums differ');
+          console.error('  Run `z10 dom` to refresh your local DOM copy, then retry.');
+          return { results, finalHtml: html, success: false };
+        }
+      } catch (err) {
+        // Server unreachable — warn but continue in offline mode
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`  ⚠ Server sync failed (${msg}), continuing offline`);
+      }
     }
 
     const result: StatementResult = {
       statement: summarizeStatement(stmt),
       success: true,
-      checksum,
+      checksum: localChecksum,
     };
     results.push(result);
     console.log(`✓ ${result.statement}`);
