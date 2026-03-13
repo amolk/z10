@@ -4,8 +4,8 @@
  * Return the current project DOM HTML and checksum.
  *
  * Query params:
- *   ?compact=true  — return compact tree view instead of full HTML
- *   ?page=<pageId> — return specific page (future use)
+ *   ?compact=true       — return compact tree view instead of full HTML
+ *   ?page=<rootNodeId>  — return only the specified page's DOM
  *
  * Response:
  *   { html: string, checksum: string }
@@ -46,18 +46,6 @@ export async function GET(
   const html = project.content ?? "";
   const computeChecksum = await getChecksum();
   const checksum = computeChecksum(html);
-
-  const url = new URL(request.url);
-  const compact = url.searchParams.get("compact") === "true";
-
-  if (compact) {
-    // Return compact tree view
-    const { compactTreeView } = await import("z10/cli/dom");
-    return NextResponse.json({
-      html: compactTreeView(html),
-      checksum,
-    });
-  }
 
   return NextResponse.json({ html, checksum });
 }

@@ -36,7 +36,8 @@ export function createDefaultContent(projectName: string): string {
   </style>
 </head>
 <body>
-  <div data-z10-page="Page 1" data-z10-id="page_1" style="width: 1440px; min-height: 900px; background: var(--color-white); position: relative;">
+  <div data-z10-page="Page 1" data-z10-id="page_1" style="position: relative;">
+    <div data-z10-id="frame_page_1" data-z10-node="Frame" style="position: absolute; left: 0px; top: 0px; width: 1440px; height: 900px; background-color: #ffffff; overflow: hidden;"></div>
   </div>
 </body>
 </html>`;

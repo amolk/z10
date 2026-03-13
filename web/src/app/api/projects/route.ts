@@ -1,13 +1,24 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
+import { authenticateMcp } from "@/lib/mcp-auth";
 import { db } from "@/db";
 import { projects } from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { createDefaultContent } from "@/lib/default-project";
 
-export async function GET() {
+export async function GET(request: Request) {
+  // Try NextAuth session first, then fall back to MCP auth (API key / connect token)
   const session = await auth();
-  if (!session?.user?.id) {
+  let userId = session?.user?.id;
+
+  if (!userId) {
+    const mcpAuth = await authenticateMcp(request);
+    if (mcpAuth) {
+      userId = mcpAuth.userId;
+    }
+  }
+
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -21,7 +32,7 @@ export async function GET() {
       createdAt: projects.createdAt,
     })
     .from(projects)
-    .where(eq(projects.ownerId, session.user.id))
+    .where(eq(projects.ownerId, userId))
     .orderBy(desc(projects.updatedAt));
 
   return NextResponse.json({ projects: result });

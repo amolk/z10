@@ -34,26 +34,60 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   return headers;
 }
 
-export async function execStatement(
+export interface ExecStreamEvent {
+  type: 'result' | 'done' | 'error';
+  statement?: string;
+  success?: boolean;
+  error?: string;
+  checksum: string;
+}
+
+/**
+ * Send a script to the server for per-statement streaming execution.
+ * Returns an async iterable of NDJSON events.
+ */
+export async function* execScriptStream(
   projectId: string,
-  statement: string,
-  localChecksum: string
-): Promise<ExecResult> {
+  script: string,
+  pageRootId?: string,
+): AsyncGenerator<ExecStreamEvent> {
   const baseUrl = await getBaseUrl();
   const headers = await getAuthHeaders();
 
   const res = await fetch(`${baseUrl}/api/projects/${projectId}/exec`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ statement, localChecksum }),
+    body: JSON.stringify({ script, pageRootId }),
   });
 
   if (!res.ok) {
     const text = await res.text();
-    return { success: false, checksum: localChecksum, error: `Server error (${res.status}): ${text}` };
+    yield { type: 'error', error: `Server error (${res.status}): ${text}`, checksum: '' };
+    return;
   }
 
-  return await res.json() as ExecResult;
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split('\n');
+    buffer = lines.pop()!;
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      yield JSON.parse(line) as ExecStreamEvent;
+    }
+  }
+
+  // Process any remaining data
+  if (buffer.trim()) {
+    yield JSON.parse(buffer) as ExecStreamEvent;
+  }
 }
 
 export async function fetchDom(
@@ -78,6 +112,55 @@ export async function fetchDom(
   }
 
   return await res.json() as DomResult;
+}
+
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  slug: string;
+  thumbnail: string | null;
+  updatedAt: string | null;
+  createdAt: string | null;
+}
+
+export async function fetchProjects(): Promise<ProjectSummary[]> {
+  const baseUrl = await getBaseUrl();
+  const headers = await getAuthHeaders();
+
+  const res = await fetch(`${baseUrl}/api/projects`, {
+    method: 'GET',
+    headers,
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to fetch projects (${res.status}): ${await res.text()}`);
+  }
+
+  const data = await res.json() as { projects: ProjectSummary[] };
+  return data.projects;
+}
+
+export interface PageSummary {
+  name: string;
+  rootNodeId: string;
+  mode: string;
+}
+
+export async function fetchPages(projectId: string): Promise<PageSummary[]> {
+  const baseUrl = await getBaseUrl();
+  const headers = await getAuthHeaders();
+
+  const res = await fetch(`${baseUrl}/api/projects/${projectId}/pages`, {
+    method: 'GET',
+    headers,
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to fetch pages (${res.status}): ${await res.text()}`);
+  }
+
+  const data = await res.json() as { pages: PageSummary[] };
+  return data.pages;
 }
 
 export async function fetchComponents(projectId: string): Promise<string[]> {

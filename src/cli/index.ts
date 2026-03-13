@@ -17,7 +17,9 @@
  * Agent Scripting Commands:
  *   z10 login --token <token>  Authenticate with z10 server
  *   z10 logout                 Clear authentication
+ *   z10 project list            List all projects
  *   z10 project load <id>      Set current project context
+ *   z10 page list              List pages in current project
  *   z10 page load <id>         Set current page context
  *   z10 dom [--full]           Show current page DOM
  *   z10 exec                   Execute JavaScript from stdin
@@ -36,7 +38,7 @@ import { getConfigValue, setConfigValue, CONFIG_KEYS } from '../core/config.js';
 import { exportReact } from '../export/react.js';
 import { exportVue } from '../export/vue.js';
 import { exportSvelte } from '../export/svelte.js';
-import { cmdLogin, cmdLogout, cmdProjectLoad, cmdPageLoad, cmdComponents, cmdTokens as cmdTokensList } from './commands.js';
+import { cmdLogin, cmdLogout, cmdProjectLoad, cmdProjectList, cmdPageLoad, cmdPageList, cmdComponents, cmdTokens as cmdTokensList } from './commands.js';
 import { cmdExec } from './exec.js';
 import { cmdDom } from './dom.js';
 import type { ProjectConfig } from '../core/types.js';
@@ -82,21 +84,29 @@ async function main(): Promise<void> {
     case 'project':
       if (args[1] === 'load') {
         await cmdProjectLoad(args.slice(2));
+      } else if (args[1] === 'list') {
+        await cmdProjectList();
       } else {
-        console.error('Usage: z10 project load <project-id>');
+        console.error('Usage: z10 project <list|load <project-id>>');
         process.exit(1);
       }
       break;
     case 'page':
       if (args[1] === 'load') {
         await cmdPageLoad(args.slice(2));
+      } else if (args[1] === 'list') {
+        await cmdPageList();
       } else {
-        console.error('Usage: z10 page load <page-id>');
+        console.error('Usage: z10 page <list|load <page-id>>');
         process.exit(1);
       }
       break;
     case 'dom':
-      await cmdDom(args.slice(1));
+      if (args[1] === 'exec') {
+        await cmdExec(args.slice(2));
+      } else {
+        await cmdDom(args.slice(1));
+      }
       break;
     case 'exec':
       await cmdExec(args.slice(1));
@@ -316,7 +326,9 @@ Usage:
 Agent Scripting:
   z10 login --token <token>  Authenticate with z10 server
   z10 logout                 Clear authentication
+  z10 project list           List all projects
   z10 project load <id>      Set current project context
+  z10 page list              List pages in current project
   z10 page load <id>         Set current page context
   z10 dom [--full]           Show current page DOM tree
   z10 exec                   Execute JavaScript from stdin

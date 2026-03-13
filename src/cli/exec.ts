@@ -1,27 +1,28 @@
 /**
  * z10 exec — Statement-level JavaScript execution
  *
- * Reads JavaScript from stdin, parses it into individual statements using acorn,
- * executes each against a local DOM (happy-dom), streams results to stdout,
- * and syncs with the z10 server via checksums.
+ * Reads JavaScript from stdin, sends to the server for per-statement
+ * execution with streaming results. Each statement is executed in order,
+ * with const/let rewritten to var so variables persist across statements.
  *
- * Flow:
+ * Online flow:
  * 1. Read stdin completely
- * 2. Parse into top-level statements via acorn
- * 3. For each statement:
- *    a. Execute in happy-dom context
- *    b. Compute local checksum
- *    c. Send to server, compare checksums
- *    d. Print ✓ or ✗ to stdout
- * 4. Exit 0 on success, 1 on error
+ * 2. POST script to server
+ * 3. Server parses into statements, executes each, streams NDJSON results
+ * 4. CLI prints ✓ or ✗ per statement as results stream back
+ *
+ * Offline flow:
+ * 1. Read stdin, parse into statements
+ * 2. Execute each locally in happy-dom with var rewriting
+ * 3. Print ✓ or ✗ per statement
  */
 
 import * as acorn from 'acorn';
 import { Window } from 'happy-dom';
 import { createContext, runInContext, type Context } from 'node:vm';
 import { loadSession } from './session.js';
-import { computeChecksum, checksumsMatch } from './checksum.js';
-import { execStatement as sendToServer } from './api.js';
+import { computeChecksum } from './checksum.js';
+import { execScriptStream } from './api.js';
 
 export interface ExecOptions {
   /** Skip server sync (local-only mode) */
@@ -32,6 +33,8 @@ export interface ExecOptions {
   projectId?: string;
   /** Initial HTML to seed the DOM */
   initialHtml?: string;
+  /** Scope document queries to this page root node ID */
+  pageRootId?: string;
 }
 
 export interface StatementResult {
@@ -59,8 +62,6 @@ export function parseStatements(source: string): string[] {
       statements.push(source.slice(node.start, node.end));
     }
   } catch (err) {
-    // If parsing fails, treat entire input as a single statement
-    // This handles edge cases like incomplete code
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(`Parse error: ${msg}`);
   }
@@ -69,9 +70,43 @@ export function parseStatements(source: string): string[] {
 }
 
 /**
- * Create a happy-dom execution environment with a z10 global.
+ * Rewrite top-level const/let declarations to var so that variables
+ * persist across separate runInContext calls on the same context.
  */
-export function createExecEnvironment(initialHtml?: string): {
+export function rewriteDeclarations(statement: string): string {
+  try {
+    const ast = acorn.parse(statement, {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      allowAwaitOutsideFunction: true,
+    });
+
+    let result = statement;
+    let offset = 0;
+
+    for (const node of (ast as acorn.Program).body) {
+      if (node.type === 'VariableDeclaration' && node.kind !== 'var') {
+        const keywordLen = node.kind.length; // 'const' = 5, 'let' = 3
+        const start = node.start + offset;
+        result = result.slice(0, start) + 'var' + result.slice(start + keywordLen);
+        offset += 3 - keywordLen;
+      }
+    }
+
+    return result;
+  } catch {
+    return statement;
+  }
+}
+
+/**
+ * Create a happy-dom execution environment with a z10 global.
+ *
+ * When `pageRootId` is provided, the `document` exposed to scripts is scoped
+ * to the page's root element so queries like `getElementById` only find
+ * elements within the current page.
+ */
+export function createExecEnvironment(initialHtml?: string, pageRootId?: string): {
   window: InstanceType<typeof Window>;
   context: Context;
   getHtml: () => string;
@@ -84,6 +119,37 @@ export function createExecEnvironment(initialHtml?: string): {
   if (initialHtml) {
     document.body.innerHTML = initialHtml;
   }
+
+  // When a page is active, scope document queries to the page root element
+  const pageRoot = pageRootId
+    ? document.querySelector(`[data-z10-id="${pageRootId}"]`) ?? document.getElementById(pageRootId)
+    : null;
+
+  const scopedDocument = pageRoot
+    ? new Proxy(document, {
+        get(target, prop, receiver) {
+          if (prop === 'body') {
+            return pageRoot;
+          }
+          if (prop === 'getElementById') {
+            return (id: string) => pageRoot.querySelector(`#${id}`) ?? pageRoot.querySelector(`[data-z10-id="${id}"]`);
+          }
+          if (prop === 'querySelector') {
+            return (sel: string) => pageRoot.querySelector(sel);
+          }
+          if (prop === 'querySelectorAll') {
+            return (sel: string) => pageRoot.querySelectorAll(sel);
+          }
+          if (prop === 'getElementsByClassName') {
+            return (cls: string) => pageRoot.getElementsByClassName(cls);
+          }
+          if (prop === 'getElementsByTagName') {
+            return (tag: string) => pageRoot.getElementsByTagName(tag);
+          }
+          return Reflect.get(target, prop, receiver);
+        },
+      })
+    : document;
 
   // z10 global for token management
   const z10Global = {
@@ -102,7 +168,7 @@ export function createExecEnvironment(initialHtml?: string): {
   // Build the VM context with window globals exposed
   const contextObj: Record<string, unknown> = {
     window,
-    document,
+    document: scopedDocument,
     z10: z10Global,
     console: {
       log: (...args: unknown[]) => console.log('[z10]', ...args),
@@ -153,28 +219,24 @@ export function summarizeStatement(statement: string): string {
 }
 
 /**
- * Run the full exec pipeline: parse stdin, execute statements, sync with server.
+ * Run exec locally (offline mode).
  *
- * For each statement:
- * 1. Execute locally in happy-dom
- * 2. Compute local checksum
- * 3. If online: send to server, compare checksums
- * 4. On checksum mismatch: emit STALE_DOM error, exit
- * 5. Print ✓ or ✗ to stdout
+ * Parses source into statements, executes each with const/let → var
+ * rewriting so variables persist across statements.
  */
-export async function runExec(source: string, options: ExecOptions = {}): Promise<{
+export function runExecOffline(source: string, options: ExecOptions = {}): {
   results: StatementResult[];
   finalHtml: string;
   success: boolean;
-}> {
+} {
   const statements = parseStatements(source);
   const results: StatementResult[] = [];
 
-  const { context, getHtml } = createExecEnvironment(options.initialHtml);
-  const online = !options.offline && !!options.projectId;
+  const { context, getHtml } = createExecEnvironment(options.initialHtml, options.pageRootId);
 
   for (const stmt of statements) {
-    const localExec = executeStatement(stmt, context);
+    const rewritten = rewriteDeclarations(stmt);
+    const localExec = executeStatement(rewritten, context);
     const html = getHtml();
     const localChecksum = computeChecksum(html);
 
@@ -189,44 +251,6 @@ export async function runExec(source: string, options: ExecOptions = {}): Promis
       console.log(`✗ ${result.statement}`);
       console.error(`  ERROR: ${localExec.error}`);
       return { results, finalHtml: html, success: false };
-    }
-
-    // Server sync: send statement and compare checksums
-    if (online) {
-      try {
-        const serverResult = await sendToServer(options.projectId!, stmt, localChecksum);
-
-        if (!serverResult.success) {
-          const result: StatementResult = {
-            statement: summarizeStatement(stmt),
-            success: false,
-            error: serverResult.error ?? 'Server execution failed',
-            checksum: localChecksum,
-          };
-          results.push(result);
-          console.log(`✗ ${result.statement}`);
-          console.error(`  ERROR: ${serverResult.error}`);
-          return { results, finalHtml: html, success: false };
-        }
-
-        if (!checksumsMatch(localChecksum, serverResult.checksum)) {
-          const result: StatementResult = {
-            statement: summarizeStatement(stmt),
-            success: false,
-            error: 'STALE_DOM: Local and server DOM have diverged. Run `z10 dom` to refresh.',
-            checksum: localChecksum,
-          };
-          results.push(result);
-          console.log(`✗ ${result.statement}`);
-          console.error('  ERROR: STALE_DOM — local and server checksums differ');
-          console.error('  Run `z10 dom` to refresh your local DOM copy, then retry.');
-          return { results, finalHtml: html, success: false };
-        }
-      } catch (err) {
-        // Server unreachable — warn but continue in offline mode
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error(`  ⚠ Server sync failed (${msg}), continuing offline`);
-      }
     }
 
     const result: StatementResult = {
@@ -244,6 +268,9 @@ export async function runExec(source: string, options: ExecOptions = {}): Promis
 /**
  * CLI entry point for `z10 exec`.
  * Reads JavaScript from stdin and executes it.
+ *
+ * Online: sends script to server, reads streaming per-statement results.
+ * Offline: executes locally with happy-dom.
  */
 export async function cmdExec(args: string[]): Promise<void> {
   const session = await loadSession();
@@ -264,23 +291,75 @@ export async function cmdExec(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  // Load initial DOM from cache if available
-  let initialHtml: string | undefined;
-  if (!offline && session.currentProjectId) {
+  const online = !offline && !!session.currentProjectId;
+
+  if (online) {
+    // Stream to server — server parses, executes per-statement, streams results
     try {
-      const { loadDomCache } = await import('./session.js');
-      const cached = await loadDomCache();
-      if (cached) initialHtml = cached;
-    } catch {
-      // No cached DOM, start fresh
+      let totalStatements = 0;
+      let allSuccess = true;
+      let finalChecksum = '';
+
+      for await (const event of execScriptStream(
+        session.currentProjectId!,
+        source,
+        session.currentPageId,
+      )) {
+        if (event.type === 'result') {
+          totalStatements++;
+          if (event.success) {
+            console.log(`✓ ${event.statement}`);
+          } else {
+            console.log(`✗ ${event.statement}`);
+            console.error(`  ERROR: ${event.error}`);
+            allSuccess = false;
+          }
+          finalChecksum = event.checksum;
+        } else if (event.type === 'done') {
+          finalChecksum = event.checksum;
+          allSuccess = event.success ?? false;
+        } else if (event.type === 'error') {
+          console.error(`Server error: ${event.error}`);
+          allSuccess = false;
+        }
+      }
+
+      // Update local cache with server's final state
+      if (allSuccess && finalChecksum) {
+        const { saveDomCache, updateSession } = await import('./session.js');
+        const { fetchDom } = await import('./api.js');
+        try {
+          const dom = await fetchDom(session.currentProjectId!);
+          await saveDomCache(dom.html);
+          await updateSession({ domChecksum: dom.checksum });
+        } catch {
+          // Cache refresh failed, not critical
+        }
+      }
+
+      console.log(`\n${totalStatements} statement${totalStatements === 1 ? '' : 's'}, ${allSuccess ? 'all passed' : 'failed'}`);
+      if (!allSuccess) process.exit(1);
+      return;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`Server unavailable (${msg}), falling back to offline mode`);
     }
   }
 
-  const { results, finalHtml, success } = await runExec(source, {
-    offline,
-    projectId: session.currentProjectId,
-    serverUrl: session.serverUrl,
+  // Offline: execute locally
+  let initialHtml: string | undefined;
+  try {
+    const { loadDomCache } = await import('./session.js');
+    const cached = await loadDomCache();
+    if (cached) initialHtml = cached;
+  } catch {
+    // No cached DOM, start fresh
+  }
+
+  const { results, finalHtml, success } = runExecOffline(source, {
+    offline: true,
     initialHtml,
+    pageRootId: session.currentPageId,
   });
 
   // Save updated DOM cache

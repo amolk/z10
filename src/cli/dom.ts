@@ -7,41 +7,71 @@
  * Supports compact tree view (default) and full HTML (--full).
  */
 
+import { Window, type HTMLElement as HappyElement } from 'happy-dom';
 import { loadSession, saveDomCache, updateSession, requireSession } from './session.js';
 import { loadDomCache } from './session.js';
 import { fetchDom } from './api.js';
 import { computeChecksum } from './checksum.js';
 
+/** Tags to skip in tree/full output */
+const SKIP_TAGS = new Set(['SCRIPT', 'STYLE']);
+const VOID_TAGS = new Set(['br', 'hr', 'img', 'input', 'meta', 'link']);
+
+/**
+ * Parse HTML and return the page root element for a given pageId,
+ * or the body element if no pageId is specified.
+ */
+function parseAndGetRoot(html: string, pageId?: string): HappyElement | null {
+  const window = new Window({ url: 'https://z10.dev' });
+  const document = window.document;
+  document.body.innerHTML = html;
+
+  if (pageId) {
+    return document.querySelector(`[data-z10-id="${pageId}"]`) as HappyElement | null;
+  }
+
+  return document.body as unknown as HappyElement;
+}
+
+/**
+ * Extract a single page's inner HTML from full project content by its root node ID.
+ * Returns only the children of the page div — since document.body maps to the
+ * page root in the exec environment, the agent should see its contents, not the
+ * page element itself.
+ */
+function extractPageInner(html: string, pageId: string): string {
+  const root = parseAndGetRoot(html, pageId);
+  return root?.innerHTML ?? html;
+}
+
 /**
  * Generate a compact tree view of HTML.
  * Shows element structure with data-z10-id attributes.
  */
-export function compactTreeView(html: string, indent: number = 0): string {
-  // Simple regex-based tree view for compact display
+export function compactTreeView(html: string, pageId?: string): string {
+  const root = parseAndGetRoot(html, pageId);
+  if (!root) return '';
+
+  // When a page is scoped, show children of the page root.
+  // Otherwise show children of body (skipping script/style).
+  const children = Array.from(root.children) as HappyElement[];
+  const startNodes = pageId
+    ? children
+    : children.filter(c => !SKIP_TAGS.has(c.tagName));
+
   const lines: string[] = [];
-  const prefix = '  '.repeat(indent);
 
-  // Parse tags and create indented tree
-  let depth = 0;
-  const tagRegex = /<(\/?)([\w-]+)([^>]*)>/g;
-  let match;
-
-  while ((match = tagRegex.exec(html)) !== null) {
-    const [, closing, tag, attrs] = match as unknown as [string, string, string, string];
-
-    if (closing) {
-      depth = Math.max(0, depth - 1);
-      continue;
-    }
+  function walk(el: HappyElement, depth: number) {
+    if (SKIP_TAGS.has(el.tagName)) return;
 
     const indent = '  '.repeat(depth);
+    const tag = el.tagName.toLowerCase();
 
-    // Extract key attributes
-    const id = attrs.match(/data-z10-id="([^"]+)"/)?.[1]
-      ?? attrs.match(/id="([^"]+)"/)?.[1];
-    const component = attrs.match(/data-z10-component="([^"]+)"/)?.[1];
-    const intent = attrs.match(/data-z10-intent="([^"]+)"/)?.[1];
-    const classes = attrs.match(/class="([^"]+)"/)?.[1];
+    const z10Id = el.getAttribute('data-z10-id');
+    const id = z10Id ?? el.getAttribute('id');
+    const component = el.getAttribute('data-z10-component');
+    const intent = el.getAttribute('data-z10-intent');
+    const classes = el.getAttribute('class');
 
     let label = tag;
     if (component) label = `${tag} [${component}]`;
@@ -51,10 +81,15 @@ export function compactTreeView(html: string, indent: number = 0): string {
 
     lines.push(`${indent}${label}`);
 
-    // Self-closing tags don't increase depth
-    if (!attrs.endsWith('/') && !['br', 'hr', 'img', 'input', 'meta', 'link'].includes(tag)) {
-      depth++;
+    if (!VOID_TAGS.has(tag)) {
+      for (const child of Array.from(el.children) as HappyElement[]) {
+        walk(child, depth + 1);
+      }
     }
+  }
+
+  for (const node of startNodes) {
+    walk(node, 0);
   }
 
   return lines.join('\n');
@@ -69,20 +104,20 @@ export async function cmdDom(args: string[]): Promise<void> {
   const session = await loadSession();
 
   if (!offline && session.currentProjectId) {
-    // Online mode: fetch from server
+    // Online mode: fetch full DOM for caching, then filter to current page for display
     try {
-      const result = await fetchDom(session.currentProjectId, {
-        compact: !full,
-        pageId: session.currentPageId,
-      });
+      const raw = await fetchDom(session.currentProjectId);
 
-      await saveDomCache(result.html);
-      await updateSession({ domChecksum: result.checksum });
+      await saveDomCache(raw.html);
+      await updateSession({ domChecksum: raw.checksum });
 
       if (full) {
-        console.log(result.html);
+        const display = session.currentPageId
+          ? `<body>\n${extractPageInner(raw.html, session.currentPageId)}\n</body>`
+          : raw.html;
+        console.log(display.replace(/\n{3,}/g, '\n\n'));
       } else {
-        console.log(compactTreeView(result.html));
+        console.log(compactTreeView(raw.html, session.currentPageId ?? undefined));
       }
       return;
     } catch (err) {
@@ -100,8 +135,11 @@ export async function cmdDom(args: string[]): Promise<void> {
   }
 
   if (full) {
-    console.log(cached);
+    const display = session.currentPageId
+      ? `<body>\n${extractPageInner(cached, session.currentPageId)}\n</body>`
+      : cached;
+    console.log(display.replace(/\n{3,}/g, '\n\n'));
   } else {
-    console.log(compactTreeView(cached));
+    console.log(compactTreeView(cached, session.currentPageId ?? undefined));
   }
 }

@@ -5,7 +5,7 @@
  */
 
 import { loadSession, updateSession, clearSession, requireSession } from './session.js';
-import { fetchComponents, fetchTokens, fetchDom } from './api.js';
+import { fetchComponents, fetchTokens, fetchDom, fetchProjects, fetchPages } from './api.js';
 import { saveDomCache } from './session.js';
 
 /**
@@ -70,6 +70,57 @@ export async function cmdProjectLoad(args: string[]): Promise<void> {
   } catch {
     console.log(`✓ Project set: ${projectId}`);
     console.log('  ⚠ Could not fetch DOM from server (offline mode)');
+  }
+}
+
+/**
+ * z10 project list — List all projects in the logged-in account.
+ */
+export async function cmdProjectList(): Promise<void> {
+  try {
+    const projectList = await fetchProjects();
+
+    if (projectList.length === 0) {
+      console.log('No projects found.');
+      return;
+    }
+
+    console.log('Projects:');
+    for (const p of projectList) {
+      const updated = p.updatedAt ? `  (updated ${p.updatedAt})` : '';
+      console.log(`  ${p.id}  ${p.name}${updated}`);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`Failed to list projects: ${msg}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * z10 page list — List pages in the current project.
+ */
+export async function cmdPageList(): Promise<void> {
+  const session = await loadSession();
+  const projectId = requireSession(session, 'currentProjectId',
+    'No project loaded. Run `z10 project load <id>` first.');
+
+  try {
+    const pages = await fetchPages(projectId);
+
+    if (pages.length === 0) {
+      console.log('No pages found.');
+      return;
+    }
+
+    console.log('Pages:');
+    for (const p of pages) {
+      console.log(`  ${p.rootNodeId}  ${p.name}  (${p.mode})`);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`Failed to list pages: ${msg}`);
+    process.exit(1);
   }
 }
 
