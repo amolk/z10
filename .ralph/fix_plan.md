@@ -66,7 +66,7 @@ No backwards compat: this is a new `src/dom/` module. Does NOT extend the existi
 
 - [x] **A17. Metadata stripping** — Two functions: (1) `stripForAgent(root)` — clone, remove `data-z10-ts-*`, retain `data-z10-id`. For proxy/CLI serving agent reads. (2) `stripForExport(root)` — clone, remove both `data-z10-id` and `data-z10-ts-*`. For export, copy, publish. Both run on clones, never on live DOM. (§8.3, §11)
 
-- [ ] **A18. Cross-context verification test** — Write a test that runs `replayPatch` and the transaction engine against both happy-dom and browser DOM (jsdom or happy-dom browser compat mode) to confirm identical behavior. Surface any API divergence (e.g., `MutationObserver` differences, `cloneNode` behavior, `style` attribute handling) before Phases B–D build on this assumption. This is a key architectural invariant: one module, three consumers.
+- [x] **A18. Cross-context verification test** — Write a test that runs `replayPatch` and the transaction engine against both happy-dom and browser DOM (jsdom or happy-dom browser compat mode) to confirm identical behavior. Surface any API divergence (e.g., `MutationObserver` differences, `cloneNode` behavior, `style` attribute handling) before Phases B–D build on this assumption. This is a key architectural invariant: one module, three consumers.
 
 ---
 
