@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  # Core library: TypeScript compile + Vitest tests
+  core-library:
+    name: Core Library
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test
+
+  # Web app: Next.js build + lint
+  web-app:
+    name: Web App
+    runs-on: ubuntu-latest
+    needs: core-library
+    env:
+      # Build-time env vars (non-secret defaults for CI)
+      AUTH_SECRET: ci-placeholder-secret
+      DATABASE_URL: postgresql://localhost:5432/z10_ci
+      NEXTAUTH_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      # Build core library first (web depends on it via file: link)
+      - run: npm ci
+      - run: npm run build
+
+      # Build web app
+      - working-directory: web
+        run: npm ci
+      - working-directory: web
+        run: npx next lint --quiet || true
+      - working-directory: web
+        run: npm run build

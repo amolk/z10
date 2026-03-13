@@ -19,7 +19,7 @@ _Replace MCP-based agent workflow with CLI + JS execution. See `dev/agent-script
 ---
 
 ## Ready to launch
-- [ ] Deploy to production — CI/CD pipeline, staging + prod environments, domain + SSL
+- [x] Deploy to production — CI/CD pipeline (GitHub Actions CI + CD workflows), Dockerfile for self-hosted, Vercel deploy config. **Human action needed**: set up Vercel project, configure secrets (VERCEL_TOKEN, DATABASE_URL, AUTH_SECRET), domain + SSL
 
 ---
 
