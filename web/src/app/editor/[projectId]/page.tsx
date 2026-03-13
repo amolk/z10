@@ -1,3 +1,4 @@
+import Script from "next/script";
 import { auth } from "@/auth";
 import { db } from "@/db";
 import { projects } from "@/db/schema";
@@ -30,10 +31,13 @@ export default async function EditorPage({
   if (!project) notFound();
 
   return (
-    <EditorShell
-      projectId={project.id}
-      projectName={project.name}
-      initialContent={project.content ?? ""}
-    />
+    <>
+      <Script src="/tailwindcss.js" strategy="beforeInteractive" />
+      <EditorShell
+        projectId={project.id}
+        projectName={project.name}
+        initialContent={project.content ?? ""}
+      />
+    </>
   );
 }
