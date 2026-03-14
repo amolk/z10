@@ -198,3 +198,42 @@ export async function fetchTokens(projectId: string): Promise<{
 
   return await res.json() as { primitives: Record<string, string>; semantic: Record<string, string> };
 }
+
+// ── New collaborative DOM API functions (Phase B/C) ──
+
+export interface SyncResult {
+  html: string;
+  txId: number;
+}
+
+/**
+ * Fetch initial sync data: full DOM + current txId.
+ * Used by B6 (CLI startup) to bootstrap the local proxy.
+ */
+export async function fetchSync(projectId: string): Promise<SyncResult> {
+  const baseUrl = await getBaseUrl();
+  const headers = await getAuthHeaders();
+
+  const res = await fetch(`${baseUrl}/api/projects/${projectId}/sync`, {
+    method: 'GET',
+    headers,
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to fetch sync (${res.status}): ${await res.text()}`);
+  }
+
+  return await res.json() as SyncResult;
+}
+
+/**
+ * Get the server base URL and auth token for SSE connections.
+ * Used by PatchStream (B5).
+ */
+export async function getConnectionInfo(): Promise<{ baseUrl: string; authToken?: string }> {
+  const session = await loadSession();
+  return {
+    baseUrl: session.serverUrl ?? 'http://127.0.0.1:29910',
+    authToken: session.authToken ?? undefined,
+  };
+}

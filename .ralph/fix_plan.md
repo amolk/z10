@@ -82,7 +82,7 @@ No backwards compat: delete `src/cli/checksum.ts`, gut `src/cli/exec.ts` (remove
 
 - [x] **B4. refreshSubtree** — `refreshSubtree(ticketId)` → `{changed, html?, newTicketId?}`. Checks if the subtree has changed since the ticket was issued by comparing `data-z10-ts-tree` on the subtree root. If changed, returns fresh stripped HTML + new ticket. If unchanged, returns `{changed: false}`. (§8.2)
 
-- [ ] **B5. CLI SSE patch consumer** — Connect to server SSE stream. Replay patches against CLI's local DOM via `replayPatch` (A15). Track `lastSeenTxId`. Handle reconnection: send `lastSeenTxId`, receive missed patches or full resync. (§7.4, §8.1)
+- [x] **B5. CLI SSE patch consumer** — Connect to server SSE stream. Replay patches against CLI's local DOM via `replayPatch` (A15). Track `lastSeenTxId`. Handle reconnection: send `lastSeenTxId`, receive missed patches or full resync. (§7.4, §8.1)
 
 - [ ] **B6. CLI startup + resync** — On first operation for a project: fetch full document + current `txId` from server (C4), bootstrap into happy-dom (A4 if needed), subscribe to patch stream. On gap too large: full resync discards local DOM, rebuilds from server. (§7.4, §7.5, §14.6)
 
