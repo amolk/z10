@@ -96,7 +96,7 @@ No backwards compat: delete `src/cli/checksum.ts`, gut `src/cli/exec.ts` (remove
 
 No backwards compat: the current `/api/projects/:id/exec` endpoint (statement-by-statement streaming NDJSON) and `/api/projects/:id/dom` endpoint (full HTML + checksum) get replaced. The current `ProjectEventBus` (full-content broadcast) gets replaced by patch broadcast.
 
-- [ ] **C1. Server canonical DOM** — On project open, load content from DB into a happy-dom instance. This is the canonical DOM. Run `bootstrapDocument` (A4) if the document lacks `data-z10-id`/`data-z10-ts-*` (first-time migration). Server holds one happy-dom instance per active project. (§5.1)
+- [x] **C1. Server canonical DOM** — On project open, load content from DB into a happy-dom instance. This is the canonical DOM. Run `bootstrapDocument` (A4) if the document lacks `data-z10-id`/`data-z10-ts-*` (first-time migration). Server holds one happy-dom instance per active project. (§5.1)
 
 - [ ] **C2. Server transaction endpoint** — New endpoint: `POST /api/projects/:id/transact`. Accepts `{code, manifest, subtreeRootNid}`. Runs transaction engine (A9) against canonical DOM. Returns `{status: 'committed', timestamp, patch}` or `{status: 'rejected', conflicts, freshHtml}`. Replaces current `/api/projects/:id/exec`. (§5.2, §5.4)
 

@@ -21,6 +21,10 @@
     "./cli/dom": {
       "types": "./dist/cli/dom.d.ts",
       "default": "./dist/cli/dom.js"
+    },
+    "./dom": {
+      "types": "./dist/dom/index.d.ts",
+      "default": "./dist/dom/index.js"
     }
   },
   "bin": {
