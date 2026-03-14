@@ -1,34 +1,39 @@
 /**
- * Export Z10 documents to React + Tailwind code.
+ * Export DOM trees to React + Tailwind code.
  *
- * Converts Z10 nodes into functional React components using Tailwind CSS
+ * E6: Migrated from Z10Document/Z10Node to DOM Element input.
+ * Converts DOM elements into functional React components using Tailwind CSS
  * utility classes where possible, falling back to inline styles for
  * values that don't map cleanly to Tailwind.
- *
- * PRD Section 2.10: export_react(id?) — Generate React/Tailwind
- * PRD Phase 2: Export to React + Tailwind
  */
 
-import type {
-  Z10Document,
-  Z10Node,
-  NodeId,
-  ComponentSchema,
-  StyleMap,
-} from '../core/types.js';
-import { getNode, getChildren, getComponent } from '../core/document.js';
+import type { ComponentSchema, StyleMap } from '../core/types.js';
+import { stripForExport } from '../dom/strip.js';
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
+/** Shared export context for component schemas and design tokens */
+export interface ExportContext {
+  /** Component schemas for generating typed component definitions */
+  components?: ComponentSchema[];
+  /** Design token maps for CSS custom property export */
+  tokens?: {
+    primitives?: Map<string, { name: string; value: string }>;
+    semantic?: Map<string, { name: string; value: string }>;
+  };
+}
+
 export interface ExportReactOptions {
-  /** Node ID to export (omit for full document) */
-  id?: NodeId;
+  /** CSS selector for subtree root (omit for full element) */
+  selector?: string;
   /** Include design tokens as CSS variables (default: true) */
   includeTokens?: boolean;
   /** Use TypeScript (default: true) */
   typescript?: boolean;
+  /** Component schemas and token context */
+  context?: ExportContext;
 }
 
 export interface ExportReactResult {
@@ -40,9 +45,9 @@ export interface ExportReactResult {
   tokensCss?: string;
 }
 
-/** Export a Z10 document (or subtree) to React + Tailwind code */
-export function exportReact(doc: Z10Document, options: ExportReactOptions = {}): ExportReactResult {
-  const { id, includeTokens = true, typescript = true } = options;
+/** Export a DOM element (or subtree) to React + Tailwind code */
+export function exportReact(root: Element, options: ExportReactOptions = {}): ExportReactResult {
+  const { selector, includeTokens = true, typescript = true, context = {} } = options;
   const components: string[] = [];
   const parts: string[] = [];
 
@@ -50,37 +55,50 @@ export function exportReact(doc: Z10Document, options: ExportReactOptions = {}):
   parts.push(`import React from 'react';`);
   parts.push('');
 
-  // Export component definitions first
-  for (const schema of doc.components.values()) {
-    parts.push(generateComponentDefinition(schema, typescript));
-    parts.push('');
-    components.push(schema.name);
+  // Export component definitions from context
+  if (context.components) {
+    for (const schema of context.components) {
+      parts.push(generateComponentDefinition(schema, typescript));
+      parts.push('');
+      components.push(schema.name);
+    }
   }
 
-  // Export pages or a specific subtree
-  if (id) {
-    const node = getNode(doc, id);
-    if (!node) {
-      return { code: `// Error: Node not found: ${id}`, components: [] };
+  // Export subtree or full element
+  if (selector) {
+    const target = root.querySelector(selector);
+    if (!target) {
+      return { code: `// Error: Element not found: ${selector}`, components: [] };
     }
-    const pageName = toPascalCase(node.id);
-    parts.push(generateNodeComponent(doc, node, pageName, typescript));
-    components.push(pageName);
+    const stripped = stripForExport(target);
+    const name = elementToComponentName(target);
+    parts.push(generateElementComponent(stripped, name, typescript));
+    components.push(name);
   } else {
-    for (const page of doc.pages) {
-      const root = doc.nodes.get(page.rootNodeId);
-      if (!root) continue;
-      const pageName = toPascalCase(page.name);
-      parts.push(generateNodeComponent(doc, root, pageName, typescript));
-      parts.push('');
-      components.push(pageName);
+    // Check for page containers (data-z10-page divs)
+    const pages = root.querySelectorAll('[data-z10-page]');
+    if (pages.length > 0) {
+      for (let i = 0; i < pages.length; i++) {
+        const page = pages[i] as Element;
+        const stripped = stripForExport(page);
+        const pageName = toPascalCase(page.getAttribute('data-z10-page') || `Page${i + 1}`);
+        parts.push(generateElementComponent(stripped, pageName, typescript));
+        parts.push('');
+        components.push(pageName);
+      }
+    } else {
+      // Export the root element itself
+      const stripped = stripForExport(root);
+      const name = elementToComponentName(root);
+      parts.push(generateElementComponent(stripped, name, typescript));
+      components.push(name);
     }
   }
 
   // Tokens CSS
   let tokensCss: string | undefined;
-  if (includeTokens) {
-    tokensCss = generateTokensCss(doc);
+  if (includeTokens && context.tokens) {
+    tokensCss = generateTokensCss(context.tokens);
   }
 
   return {
@@ -91,7 +109,7 @@ export function exportReact(doc: Z10Document, options: ExportReactOptions = {}):
 }
 
 // ---------------------------------------------------------------------------
-// Component Definition Generator
+// Component Definition Generator (from schemas)
 // ---------------------------------------------------------------------------
 
 function generateComponentDefinition(schema: ComponentSchema, typescript: boolean): string {
@@ -124,7 +142,7 @@ function generateComponentDefinition(schema: ComponentSchema, typescript: boolea
 
   // Convert template to JSX
   if (schema.template) {
-    const jsx = templateToJsx(schema.template, schema);
+    const jsx = templateToJsx(schema.template);
     lines.push(`  return (`);
     lines.push(`    ${jsx}`);
     lines.push(`  );`);
@@ -137,60 +155,69 @@ function generateComponentDefinition(schema: ComponentSchema, typescript: boolea
 }
 
 // ---------------------------------------------------------------------------
-// Node Tree → React Component
+// DOM Element → React Component
 // ---------------------------------------------------------------------------
 
-function generateNodeComponent(doc: Z10Document, root: Z10Node, name: string, typescript: boolean): string {
+function generateElementComponent(root: Element, name: string, _typescript: boolean): string {
   const lines: string[] = [];
 
   lines.push(`export function ${name}() {`);
   lines.push('  return (');
-  lines.push(renderNode(doc, root, 2));
+  lines.push(renderElement(root, 2));
   lines.push('  );');
   lines.push('}');
 
   return lines.join('\n');
 }
 
-function renderNode(doc: Z10Document, node: Z10Node, indent: number): string {
+function renderElement(el: Element, indent: number): string {
   const pad = '  '.repeat(indent);
-  const children = getChildren(doc, node.id);
+  const children = Array.from(el.children);
 
   // If this is a component instance, render as component
-  if (node.componentName) {
-    return renderComponentInstance(doc, node, indent);
+  const componentName = el.getAttribute('data-z10-component');
+  if (componentName) {
+    return renderComponentInstance(el, componentName, indent);
   }
 
   // Map HTML tag
-  const tag = mapHtmlTag(node.tag);
+  const tag = el.tagName.toLowerCase();
 
   // Build className and style
-  const { className, style } = stylesToTailwind(node.styles);
-  const attrs = buildJsxAttributes(node, className, style);
+  const styles = parseInlineStyle(el.getAttribute('style') || '');
+  const { className, style } = stylesToTailwind(styles);
+  const attrs = buildJsxAttributes(el, className, style);
 
-  if (children.length === 0 && !node.textContent) {
+  // Get direct text content (not from child elements)
+  const textContent = getDirectTextContent(el);
+
+  if (children.length === 0 && !textContent) {
     return `${pad}<${tag}${attrs} />`;
   }
 
   const parts: string[] = [];
   parts.push(`${pad}<${tag}${attrs}>`);
 
-  if (node.textContent) {
-    parts.push(`${pad}  ${escapeJsx(node.textContent)}`);
+  if (textContent) {
+    parts.push(`${pad}  ${escapeJsx(textContent)}`);
   }
 
   for (const child of children) {
-    parts.push(renderNode(doc, child, indent + 1));
+    parts.push(renderElement(child, indent + 1));
   }
 
   parts.push(`${pad}</${tag}>`);
   return parts.join('\n');
 }
 
-function renderComponentInstance(doc: Z10Document, node: Z10Node, indent: number): string {
+function renderComponentInstance(el: Element, componentName: string, indent: number): string {
   const pad = '  '.repeat(indent);
-  const componentName = node.componentName!;
-  const props = node.componentProps ?? {};
+
+  // Try to read props from data-z10-props attribute
+  const propsAttr = el.getAttribute('data-z10-props');
+  const props: Record<string, string | number | boolean> = propsAttr
+    ? JSON.parse(propsAttr)
+    : {};
 
   const propEntries = Object.entries(props);
   if (propEntries.length === 0) {
@@ -211,77 +238,45 @@ function renderComponentInstance(doc: Z10Document, node: Z10Node, indent: number
 // CSS → Tailwind Conversion
 // ---------------------------------------------------------------------------
 
-/**
- * CSS-to-Tailwind mapping. Maps CSS property+value pairs to Tailwind classes.
- * Falls back to inline styles for unmapped values.
- */
 const TAILWIND_MAP: Record<string, Record<string, string> | ((value: string) => string | null)> = {
   'display': {
-    'flex': 'flex',
-    'grid': 'grid',
-    'block': 'block',
-    'inline': 'inline',
-    'inline-block': 'inline-block',
-    'inline-flex': 'inline-flex',
-    'none': 'hidden',
+    'flex': 'flex', 'grid': 'grid', 'block': 'block',
+    'inline': 'inline', 'inline-block': 'inline-block',
+    'inline-flex': 'inline-flex', 'none': 'hidden',
   },
   'flex-direction': {
-    'row': 'flex-row',
-    'column': 'flex-col',
-    'row-reverse': 'flex-row-reverse',
-    'column-reverse': 'flex-col-reverse',
+    'row': 'flex-row', 'column': 'flex-col',
+    'row-reverse': 'flex-row-reverse', 'column-reverse': 'flex-col-reverse',
   },
   'flex-wrap': {
-    'wrap': 'flex-wrap',
-    'nowrap': 'flex-nowrap',
-    'wrap-reverse': 'flex-wrap-reverse',
+    'wrap': 'flex-wrap', 'nowrap': 'flex-nowrap', 'wrap-reverse': 'flex-wrap-reverse',
   },
   'justify-content': {
-    'flex-start': 'justify-start',
-    'flex-end': 'justify-end',
-    'center': 'justify-center',
-    'space-between': 'justify-between',
-    'space-around': 'justify-around',
-    'space-evenly': 'justify-evenly',
+    'flex-start': 'justify-start', 'flex-end': 'justify-end',
+    'center': 'justify-center', 'space-between': 'justify-between',
+    'space-around': 'justify-around', 'space-evenly': 'justify-evenly',
   },
   'align-items': {
-    'flex-start': 'items-start',
-    'flex-end': 'items-end',
-    'center': 'items-center',
-    'baseline': 'items-baseline',
-    'stretch': 'items-stretch',
+    'flex-start': 'items-start', 'flex-end': 'items-end',
+    'center': 'items-center', 'baseline': 'items-baseline', 'stretch': 'items-stretch',
   },
   'text-align': {
-    'left': 'text-left',
-    'center': 'text-center',
-    'right': 'text-right',
-    'justify': 'text-justify',
+    'left': 'text-left', 'center': 'text-center',
+    'right': 'text-right', 'justify': 'text-justify',
   },
   'position': {
-    'relative': 'relative',
-    'absolute': 'absolute',
-    'fixed': 'fixed',
-    'sticky': 'sticky',
-    'static': 'static',
+    'relative': 'relative', 'absolute': 'absolute',
+    'fixed': 'fixed', 'sticky': 'sticky', 'static': 'static',
   },
   'overflow': {
-    'hidden': 'overflow-hidden',
-    'auto': 'overflow-auto',
-    'scroll': 'overflow-scroll',
-    'visible': 'overflow-visible',
+    'hidden': 'overflow-hidden', 'auto': 'overflow-auto',
+    'scroll': 'overflow-scroll', 'visible': 'overflow-visible',
   },
   'font-weight': {
-    '100': 'font-thin',
-    '200': 'font-extralight',
-    '300': 'font-light',
-    '400': 'font-normal',
-    '500': 'font-medium',
-    '600': 'font-semibold',
-    '700': 'font-bold',
-    '800': 'font-extrabold',
-    '900': 'font-black',
-    'bold': 'font-bold',
-    'normal': 'font-normal',
+    '100': 'font-thin', '200': 'font-extralight', '300': 'font-light',
+    '400': 'font-normal', '500': 'font-medium', '600': 'font-semibold',
+    '700': 'font-bold', '800': 'font-extrabold', '900': 'font-black',
+    'bold': 'font-bold', 'normal': 'font-normal',
   },
   'width': (v) => mapSpacingValue('w', v),
   'height': (v) => mapSpacingValue('h', v),
@@ -304,36 +299,27 @@ const TAILWIND_MAP: Record<string, Record<string, string> | ((value: string) => 
   'font-size': (v) => mapFontSize(v),
 };
 
-/** Map spacing values (px/rem) to Tailwind spacing scale */
 function mapSpacingValue(prefix: string, value: string): string | null {
-  // Handle special keywords
   if (value === '100%') return `${prefix}-full`;
   if (value === 'auto') return `${prefix}-auto`;
-  if (value === '100vw') return `${prefix}-screen`;
-  if (value === '100vh') return `${prefix}-screen`;
+  if (value === '100vw' || value === '100vh') return `${prefix}-screen`;
   if (value === '0' || value === '0px') return `${prefix}-0`;
 
-  // Handle px values → Tailwind 4px scale
   const pxMatch = value.match(/^(\d+(?:\.\d+)?)px$/);
   if (pxMatch) {
-    const px = parseFloat(pxMatch[1]!);
-    const twValue = pxToTailwind(px);
+    const twValue = pxToTailwind(parseFloat(pxMatch[1]!));
     if (twValue !== null) return `${prefix}-${twValue}`;
   }
 
-  // Handle rem values
   const remMatch = value.match(/^(\d+(?:\.\d+)?)rem$/);
   if (remMatch) {
-    const rem = parseFloat(remMatch[1]!);
-    const px = rem * 16;
-    const twValue = pxToTailwind(px);
+    const twValue = pxToTailwind(parseFloat(remMatch[1]!) * 16);
     if (twValue !== null) return `${prefix}-${twValue}`;
   }
 
   return null;
 }
 
-/** Convert px value to Tailwind spacing unit */
 function pxToTailwind(px: number): string | null {
   const scale: Record<number, string> = {
     0: '0', 1: 'px', 2: '0.5', 4: '1', 6: '1.5', 8: '2', 10: '2.5',
@@ -372,7 +358,6 @@ function mapFontSize(value: string): string | null {
   return map[value] ?? null;
 }
 
-/** Convert a StyleMap to Tailwind classes + remaining inline styles */
 function stylesToTailwind(styles: StyleMap): { className: string; style: StyleMap } {
   const classes: string[] = [];
   const remaining: StyleMap = {};
@@ -384,13 +369,9 @@ function stylesToTailwind(styles: StyleMap): { className: string; style: StyleMa
     if (mapping) {
       if (typeof mapping === 'function') {
         const cls = mapping(value);
-        if (cls) {
-          classes.push(cls);
-          mapped = true;
-        }
+        if (cls) { classes.push(cls); mapped = true; }
       } else if (mapping[value]) {
-        classes.push(mapping[value]);
-        mapped = true;
+        classes.push(mapping[value]); mapped = true;
       }
     }
 
@@ -399,17 +380,14 @@ function stylesToTailwind(styles: StyleMap): { className: string; style: StyleMa
     }
   }
 
-  return {
-    className: classes.join(' '),
-    style: remaining,
-  };
+  return { className: classes.join(' '), style: remaining };
 }
 
 // ---------------------------------------------------------------------------
 // JSX Attribute Building
 // ---------------------------------------------------------------------------
 
-function buildJsxAttributes(node: Z10Node, className: string, style: StyleMap): string {
+function buildJsxAttributes(el: Element, className: string, style: StyleMap): string {
   const attrs: string[] = [];
 
   if (className) {
@@ -424,10 +402,13 @@ function buildJsxAttributes(node: Z10Node, className: string, style: StyleMap): 
     attrs.push(`style={{ ${styleObj} }}`);
   }
 
-  // Add data attributes (except z10 internal ones)
-  for (const [key, value] of Object.entries(node.attributes)) {
-    if (key.startsWith('data-z10-')) continue;
-    attrs.push(`${key}="${escapeJsx(value)}"`);
+  // Add non-z10 attributes from the element
+  for (let i = 0; i < el.attributes.length; i++) {
+    const attr = el.attributes[i];
+    if (attr.name.startsWith('data-z10-')) continue;
+    if (attr.name === 'style') continue; // already handled
+    if (attr.name === 'class') continue; // mapped to className via Tailwind
+    attrs.push(`${attr.name}="${escapeJsx(attr.value)}"`);
   }
 
   return attrs.length > 0 ? ' ' + attrs.join(' ') : '';
@@ -437,7 +418,7 @@ function buildJsxAttributes(node: Z10Node, className: string, style: StyleMap): 
 // Template → JSX Conversion
 // ---------------------------------------------------------------------------
 
-function templateToJsx(template: string, schema: ComponentSchema): string {
+function templateToJsx(template: string): string {
   let jsx = template.trim();
 
   // Convert class= to className=
@@ -445,7 +426,7 @@ function templateToJsx(template: string, schema: ComponentSchema): string {
 
   // Convert style strings to style objects
   jsx = jsx.replace(/\bstyle="([^"]*)"/g, (_match, styleStr: string) => {
-    const styleMap = parseInlineStyleForJsx(styleStr);
+    const styleMap = parseInlineStyle(styleStr);
     if (Object.keys(styleMap).length === 0) return '';
     const obj = Object.entries(styleMap)
       .map(([k, v]) => `${toCamelCase(k)}: '${v}'`)
@@ -462,8 +443,36 @@ function templateToJsx(template: string, schema: ComponentSchema): string {
   return jsx;
 }
 
-function parseInlineStyleForJsx(style: string): Record<string, string> {
-  const result: Record<string, string> = {};
+// ---------------------------------------------------------------------------
+// Tokens CSS Generation
+// ---------------------------------------------------------------------------
+
+function generateTokensCss(tokens: NonNullable<ExportContext['tokens']>): string {
+  const lines: string[] = [];
+  lines.push(':root {');
+
+  if (tokens.primitives) {
+    for (const token of tokens.primitives.values()) {
+      lines.push(`  ${token.name}: ${token.value};`);
+    }
+  }
+  if (tokens.semantic) {
+    for (const token of tokens.semantic.values()) {
+      lines.push(`  ${token.name}: ${token.value};`);
+    }
+  }
+
+  lines.push('}');
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Parse inline style string to a StyleMap */
+function parseInlineStyle(style: string): StyleMap {
+  const result: StyleMap = {};
   for (const decl of style.split(';')) {
     const trimmed = decl.trim();
     if (!trimmed) continue;
@@ -476,28 +485,24 @@ function parseInlineStyleForJsx(style: string): Record<string, string> {
   return result;
 }
 
-// ---------------------------------------------------------------------------
-// Tokens CSS Generation
-// ---------------------------------------------------------------------------
-
-function generateTokensCss(doc: Z10Document): string {
-  const lines: string[] = [];
-  lines.push(':root {');
-
-  for (const token of doc.tokens.primitives.values()) {
-    lines.push(`  ${token.name}: ${token.value};`);
+/** Get direct text content of an element, excluding child elements */
+function getDirectTextContent(el: Element): string {
+  let text = '';
+  for (let i = 0; i < el.childNodes.length; i++) {
+    const child = el.childNodes[i];
+    if (child.nodeType === 3 /* TEXT_NODE */) {
+      text += child.textContent || '';
+    }
   }
-  for (const token of doc.tokens.semantic.values()) {
-    lines.push(`  ${token.name}: ${token.value};`);
-  }
-
-  lines.push('}');
-  return lines.join('\n');
+  return text.trim();
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+/** Derive a component name from an element */
+function elementToComponentName(el: Element): string {
+  const id = el.getAttribute('data-z10-id');
+  const page = el.getAttribute('data-z10-page');
+  return toPascalCase(page || id || el.tagName.toLowerCase());
+}
 
 function propTypeToTs(type: string, options?: string[]): string {
   switch (type) {
@@ -522,11 +527,6 @@ function toKebabCase(str: string): string {
 
 function toCamelCase(str: string): string {
   return str.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
-}
-
-function mapHtmlTag(tag: string): string {
-  // Keep semantic HTML tags as-is
-  return tag;
 }
 
 function escapeJsx(str: string): string {

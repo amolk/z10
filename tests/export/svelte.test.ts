@@ -1,35 +1,34 @@
 /**
  * Tests for Svelte export.
  *
- * Validates conversion of Z10 document structures to Svelte components
- * with Tailwind CSS utility classes.
+ * E6: Tests use DOM elements (happy-dom) instead of Z10Document.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { exportSvelte } from '../../src/export/svelte.js';
-import {
-  createDocument,
-  addNode,
-  createNode,
-  addPage,
-  setTokens,
-  setComponent,
-} from '../../src/core/document.js';
-import type { Z10Document } from '../../src/core/types.js';
+import { Window } from 'happy-dom';
+import type { ComponentSchema } from '../../src/core/types.js';
+import type { ExportContext } from '../../src/export/react.js';
 
-function buildTestDoc(): Z10Document {
-  const doc = createDocument({ name: 'TestApp' });
+function buildTestDom(): { root: Element; context: ExportContext; cleanup: () => void } {
+  const win = new Window();
+  const doc = win.document;
 
-  setTokens(doc, 'primitives', {
-    '--blue-500': '#3b82f6',
-    '--gray-900': '#111827',
-  });
-  setTokens(doc, 'semantic', {
-    '--primary': 'var(--blue-500)',
-    '--text': 'var(--gray-900)',
-  });
+  doc.body.innerHTML = `
+    <div data-z10-page="Dashboard" data-z10-id="page_root" style="width: 1440px; min-height: 900px">
+      <header data-z10-id="header" style="display: flex; justify-content: space-between; padding: 16px">
+        <h1 data-z10-id="title" style="font-size: 24px; font-weight: 700">My App</h1>
+        <div data-z10-id="save_btn" data-z10-component="Button" data-z10-props='{"label":"Save","variant":"primary"}'></div>
+      </header>
+      <main data-z10-id="content" style="padding: 32px; display: grid; gap: 16px">
+        <div data-z10-id="card" style="border-radius: 8px; padding: 24px; background: var(--bg)">
+          <p data-z10-id="card_text" style="font-size: 16px; color: var(--text)">Hello world</p>
+        </div>
+      </main>
+    </div>
+  `;
 
-  setComponent(doc, {
+  const buttonSchema: ComponentSchema = {
     name: 'Button',
     props: [
       { name: 'label', type: 'string', required: true },
@@ -42,85 +41,49 @@ function buildTestDoc(): Z10Document {
     ],
     styles: '.btn { padding: 8px 16px; border-radius: 4px; }',
     template: '<button class="btn">{{label}}</button>',
-  });
+  };
 
-  const root = createNode({ id: 'page_root', tag: 'div', parent: null, intent: 'layout' });
-  addNode(doc, root);
+  const primitives = new Map([
+    ['--blue-500', { name: '--blue-500', value: '#3b82f6', collection: 'primitives' as const }],
+    ['--gray-900', { name: '--gray-900', value: '#111827', collection: 'primitives' as const }],
+  ]);
+  const semantic = new Map([
+    ['--primary', { name: '--primary', value: 'var(--blue-500)', collection: 'semantic' as const }],
+    ['--text', { name: '--text', value: 'var(--gray-900)', collection: 'semantic' as const }],
+  ]);
 
-  const header = createNode({
-    id: 'header',
-    tag: 'header',
-    parent: 'page_root',
-    style: 'display: flex; justify-content: space-between; padding: 16px',
-    intent: 'layout',
-  });
-  addNode(doc, header);
-
-  const title = createNode({
-    id: 'title',
-    tag: 'h1',
-    parent: 'header',
-    textContent: 'My App',
-    style: 'font-size: 24px; font-weight: 700',
-  });
-  addNode(doc, title);
-
-  const btn = createNode({
-    id: 'save_btn',
-    tag: 'div',
-    parent: 'header',
-    componentName: 'Button',
-    componentProps: { label: 'Save', variant: 'primary' },
-  });
-  addNode(doc, btn);
-
-  const content = createNode({
-    id: 'content',
-    tag: 'main',
-    parent: 'page_root',
-    style: 'padding: 32px; display: grid; gap: 16px',
-    intent: 'layout',
-  });
-  addNode(doc, content);
-
-  const card = createNode({
-    id: 'card',
-    tag: 'div',
-    parent: 'content',
-    style: 'border-radius: 8px; padding: 24px; background: var(--bg)',
-  });
-  addNode(doc, card);
-
-  const cardText = createNode({
-    id: 'card_text',
-    tag: 'p',
-    parent: 'card',
-    textContent: 'Hello world',
-    style: 'font-size: 16px; color: var(--text)',
-  });
-  addNode(doc, cardText);
-
-  addPage(doc, { name: 'Dashboard', rootNodeId: 'page_root', mode: 'light' });
-
-  return doc;
+  return {
+    root: doc.body as unknown as Element,
+    context: {
+      components: [buttonSchema],
+      tokens: { primitives, semantic },
+    },
+    cleanup: () => win.close(),
+  };
 }
 
 describe('exportSvelte', () => {
-  let doc: Z10Document;
+  let root: Element;
+  let context: ExportContext;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    doc = buildTestDoc();
+    ({ root, context, cleanup } = buildTestDom());
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it('exports a full document as Svelte components', () => {
-    const result = exportSvelte(doc);
+    const result = exportSvelte(root, { context });
     expect(result.components.length).toBeGreaterThan(0);
     expect(result.components).toContain('Button');
     expect(result.components).toContain('Dashboard');
   });
 
   it('exports component with script tag and export let props', () => {
-    const result = exportSvelte(doc);
+    const result = exportSvelte(root, { context });
     expect(result.code).toContain('<script lang="ts">');
     expect(result.code).toContain('export let label: string;');
     expect(result.code).toContain("export let variant: 'primary' | 'secondary' = \"primary\";");
@@ -128,7 +91,7 @@ describe('exportSvelte', () => {
   });
 
   it('converts CSS to Tailwind classes', () => {
-    const result = exportSvelte(doc);
+    const result = exportSvelte(root, { context });
     expect(result.code).toContain('flex');
     expect(result.code).toContain('justify-between');
     expect(result.code).toContain('p-4');
@@ -142,85 +105,85 @@ describe('exportSvelte', () => {
   });
 
   it('uses class= (not className=) in Svelte templates', () => {
-    const result = exportSvelte(doc);
+    const result = exportSvelte(root, { context });
     expect(result.code).toContain('class="');
     expect(result.code).not.toContain('className=');
   });
 
   it('falls back to inline style for non-Tailwind values', () => {
-    const result = exportSvelte(doc);
-    // Svelte uses plain style= attribute
+    const result = exportSvelte(root, { context });
     expect(result.code).toContain('style="background: var(--bg)"');
   });
 
   it('renders component instances', () => {
-    const result = exportSvelte(doc);
+    const result = exportSvelte(root, { context });
     expect(result.code).toContain('<Button');
     expect(result.code).toContain('label=');
     expect(result.code).toContain('variant=');
   });
 
   it('renders text content', () => {
-    const result = exportSvelte(doc);
+    const result = exportSvelte(root, { context });
     expect(result.code).toContain('My App');
     expect(result.code).toContain('Hello world');
   });
 
   it('generates tokens CSS', () => {
-    const result = exportSvelte(doc, { includeTokens: true });
+    const result = exportSvelte(root, { includeTokens: true, context });
     expect(result.tokensCss).toBeDefined();
     expect(result.tokensCss).toContain('--blue-500: #3b82f6');
     expect(result.tokensCss).toContain('--primary: var(--blue-500)');
     expect(result.tokensCss).toContain(':root');
   });
 
-  it('exports a specific subtree by ID', () => {
-    const result = exportSvelte(doc, { id: 'content' });
+  it('exports a specific subtree by selector', () => {
+    const result = exportSvelte(root, { selector: '[data-z10-id="content"]', context });
     expect(result.components).toContain('Content');
     expect(result.code).toContain('<main');
     expect(result.code).not.toContain('justify-between');
   });
 
-  it('returns error comment for unknown node ID', () => {
-    const result = exportSvelte(doc, { id: 'nonexistent' });
-    expect(result.code).toContain('Error: Node not found');
+  it('returns error comment for unknown selector', () => {
+    const result = exportSvelte(root, { selector: '[data-z10-id="nonexistent"]', context });
+    expect(result.code).toContain('Error: Element not found');
     expect(result.components).toEqual([]);
   });
 
   it('omits tokens CSS when includeTokens is false', () => {
-    const result = exportSvelte(doc, { includeTokens: false });
+    const result = exportSvelte(root, { includeTokens: false, context });
     expect(result.tokensCss).toBeUndefined();
   });
 
   it('generates JavaScript when typescript is false', () => {
-    const result = exportSvelte(doc, { typescript: false });
+    const result = exportSvelte(root, { typescript: false, context });
     expect(result.code).not.toContain('lang="ts"');
-    // JS mode uses export let without type annotations
     expect(result.code).toContain('export let label;');
     expect(result.code).toContain('export let variant = "primary";');
   });
 
-  it('handles empty document', () => {
-    const emptyDoc = createDocument({ name: 'Empty' });
-    const result = exportSvelte(emptyDoc);
-    expect(result.components).toEqual([]);
+  it('handles empty element', () => {
+    const win = new Window();
+    win.document.body.innerHTML = '';
+    const emptyRoot = win.document.body as unknown as Element;
+    const result = exportSvelte(emptyRoot);
+    expect(result.components).toEqual(['Body']);
+    win.close();
   });
 
   it('converts template variables to Svelte expressions', () => {
-    const result = exportSvelte(doc);
-    // {{label}} should become {label}
+    const result = exportSvelte(root, { context });
     expect(result.code).toContain('{label}');
     expect(result.code).not.toContain('{{label}}');
   });
 
   it('includes styles block for components', () => {
-    const result = exportSvelte(doc);
+    const result = exportSvelte(root, { context });
     expect(result.code).toContain('<style>');
     expect(result.code).toContain('.btn { padding: 8px 16px;');
   });
 
   it('imports used components in page script', () => {
-    const result = exportSvelte(doc);
+    const result = exportSvelte(root, { context });
     expect(result.code).toContain("import Button from './Button.svelte'");
   });
 });

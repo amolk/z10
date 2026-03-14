@@ -21,9 +21,10 @@ import {
   getToken,
   serializeStyle,
 } from '../core/index.js';
-import { exportReact } from '../export/react.js';
+import { exportReact, type ExportContext } from '../export/react.js';
 import { exportVue } from '../export/vue.js';
 import { exportSvelte } from '../export/svelte.js';
+import { serializeZ10Html } from '../format/serializer.js';
 import type { LocalProxy } from '../dom/proxy.js';
 
 // ---------------------------------------------------------------------------
@@ -309,29 +310,38 @@ export async function handleDomTool(proxy: LocalProxy, name: string, args: ToolA
 }
 
 /** Handle a utility tool call */
-export function handleUtilityTool(doc: Z10Document, name: string, args: ToolArgs): string {
+export function handleUtilityTool(doc: Z10Document, name: string, args: ToolArgs, rootElement?: Element): string {
   switch (name) {
     case 'export_react': {
-      const result = exportReact(doc, {
-        id: args['id'] as string | undefined,
+      const exportRoot = rootElement ?? buildFallbackElement(doc);
+      const id = args['id'] as string | undefined;
+      const result = exportReact(exportRoot, {
+        selector: id ? `[data-z10-id="${id}"]` : undefined,
         includeTokens: args['includeTokens'] as boolean | undefined,
         typescript: args['typescript'] as boolean | undefined,
+        context: buildExportContext(doc),
       });
       return JSON.stringify(result, null, 2);
     }
     case 'export_vue': {
-      const result = exportVue(doc, {
-        id: args['id'] as string | undefined,
+      const exportRoot = rootElement ?? buildFallbackElement(doc);
+      const id = args['id'] as string | undefined;
+      const result = exportVue(exportRoot, {
+        selector: id ? `[data-z10-id="${id}"]` : undefined,
         includeTokens: args['includeTokens'] as boolean | undefined,
         typescript: args['typescript'] as boolean | undefined,
+        context: buildExportContext(doc),
       });
       return JSON.stringify(result, null, 2);
     }
     case 'export_svelte': {
-      const result = exportSvelte(doc, {
-        id: args['id'] as string | undefined,
+      const exportRoot = rootElement ?? buildFallbackElement(doc);
+      const id = args['id'] as string | undefined;
+      const result = exportSvelte(exportRoot, {
+        selector: id ? `[data-z10-id="${id}"]` : undefined,
         includeTokens: args['includeTokens'] as boolean | undefined,
         typescript: args['typescript'] as boolean | undefined,
+        context: buildExportContext(doc),
       });
       return JSON.stringify(result, null, 2);
     }
@@ -562,6 +572,32 @@ export function jsonSchemaToZodShape(schema: Record<string, unknown>): Record<st
   }
 
   return shape;
+}
+
+// ---------------------------------------------------------------------------
+// Export Helpers
+// ---------------------------------------------------------------------------
+
+/** Build an ExportContext from Z10Document's components and tokens */
+function buildExportContext(doc: Z10Document): ExportContext {
+  return {
+    components: Array.from(doc.components.values()),
+    tokens: {
+      primitives: doc.tokens.primitives,
+      semantic: doc.tokens.semantic,
+    },
+  };
+}
+
+/** Build a fallback DOM element from Z10Document when no proxy root is available */
+function buildFallbackElement(doc: Z10Document): Element {
+  // Parse the serialized HTML into a DOM tree for the exporters
+  const html = serializeZ10Html(doc);
+  // Use a simple DOMParser-like approach via happy-dom (already a dependency)
+  const { Window } = require('happy-dom');
+  const win = new Window();
+  win.document.documentElement.innerHTML = html;
+  return win.document.body as unknown as Element;
 }
 
 // ---------------------------------------------------------------------------

@@ -158,7 +158,8 @@ export function createMcpServer(): McpServer {
       tool.description,
       zodShape,
       async (args: ToolArgs) => {
-        const result = handleUtilityTool(currentDoc, tool.name, args);
+        const rootEl = currentProxy?.rootElement as unknown as Element | undefined;
+        const result = handleUtilityTool(currentDoc, tool.name, args, rootEl);
         return { content: [{ type: 'text' as const, text: result }] };
       },
     );

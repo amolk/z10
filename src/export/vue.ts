@@ -1,33 +1,28 @@
 /**
- * Export Z10 documents to Vue 3 Single File Components (SFC).
+ * Export DOM trees to Vue 3 Single File Components (SFC).
  *
- * Converts Z10 nodes into Vue 3 components using Composition API
- * with <script setup> syntax. Reuses the Tailwind CSS mapping
- * from the React export.
- *
- * PRD Phase 4: Additional export targets (Vue, Svelte)
+ * E6: Migrated from Z10Document/Z10Node to DOM Element input.
+ * Converts DOM elements into Vue 3 components using Composition API
+ * with <script setup> syntax and Tailwind CSS utility classes.
  */
 
-import type {
-  Z10Document,
-  Z10Node,
-  NodeId,
-  ComponentSchema,
-  StyleMap,
-} from '../core/types.js';
-import { getNode, getChildren, getComponent } from '../core/document.js';
+import type { ComponentSchema, StyleMap } from '../core/types.js';
+import { stripForExport } from '../dom/strip.js';
+import type { ExportContext } from './react.js';
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 export interface ExportVueOptions {
-  /** Node ID to export (omit for full document) */
-  id?: NodeId;
+  /** CSS selector for subtree root (omit for full element) */
+  selector?: string;
   /** Include design tokens as CSS variables (default: true) */
   includeTokens?: boolean;
   /** Use TypeScript in <script setup> (default: true) */
   typescript?: boolean;
+  /** Component schemas and token context */
+  context?: ExportContext;
 }
 
 export interface ExportVueResult {
@@ -39,43 +34,54 @@ export interface ExportVueResult {
   tokensCss?: string;
 }
 
-/** Export a Z10 document (or subtree) to Vue 3 SFC code */
-export function exportVue(doc: Z10Document, options: ExportVueOptions = {}): ExportVueResult {
-  const { id, includeTokens = true, typescript = true } = options;
+/** Export a DOM element (or subtree) to Vue 3 SFC code */
+export function exportVue(root: Element, options: ExportVueOptions = {}): ExportVueResult {
+  const { selector, includeTokens = true, typescript = true, context = {} } = options;
   const components: string[] = [];
   const parts: string[] = [];
 
-  // Export component definitions first
-  for (const schema of doc.components.values()) {
-    parts.push(generateComponentSfc(schema, typescript));
-    parts.push('');
-    components.push(schema.name);
+  // Export component definitions from context
+  if (context.components) {
+    for (const schema of context.components) {
+      parts.push(generateComponentSfc(schema, typescript));
+      parts.push('');
+      components.push(schema.name);
+    }
   }
 
-  // Export pages or a specific subtree
-  if (id) {
-    const node = getNode(doc, id);
-    if (!node) {
-      return { code: `<!-- Error: Node not found: ${id} -->`, components: [] };
+  // Export subtree or full element
+  if (selector) {
+    const target = root.querySelector(selector);
+    if (!target) {
+      return { code: `<!-- Error: Element not found: ${selector} -->`, components: [] };
     }
-    const pageName = toPascalCase(node.id);
-    parts.push(generatePageSfc(doc, node, pageName, typescript, components));
-    components.push(pageName);
+    const stripped = stripForExport(target);
+    const name = elementToComponentName(target);
+    parts.push(generatePageSfc(stripped, name, typescript, components));
+    components.push(name);
   } else {
-    for (const page of doc.pages) {
-      const root = doc.nodes.get(page.rootNodeId);
-      if (!root) continue;
-      const pageName = toPascalCase(page.name);
-      parts.push(generatePageSfc(doc, root, pageName, typescript, components));
-      parts.push('');
-      components.push(pageName);
+    const pages = root.querySelectorAll('[data-z10-page]');
+    if (pages.length > 0) {
+      for (let i = 0; i < pages.length; i++) {
+        const page = pages[i] as Element;
+        const stripped = stripForExport(page);
+        const pageName = toPascalCase(page.getAttribute('data-z10-page') || `Page${i + 1}`);
+        parts.push(generatePageSfc(stripped, pageName, typescript, components));
+        parts.push('');
+        components.push(pageName);
+      }
+    } else {
+      const stripped = stripForExport(root);
+      const name = elementToComponentName(root);
+      parts.push(generatePageSfc(stripped, name, typescript, components));
+      components.push(name);
     }
   }
 
   // Tokens CSS
   let tokensCss: string | undefined;
-  if (includeTokens) {
-    tokensCss = generateTokensCss(doc);
+  if (includeTokens && context.tokens) {
+    tokensCss = generateTokensCss(context.tokens);
   }
 
   return {
@@ -86,19 +92,17 @@ export function exportVue(doc: Z10Document, options: ExportVueOptions = {}): Exp
 }
 
 // ---------------------------------------------------------------------------
-// Component SFC Generator
+// Component SFC Generator (from schemas)
 // ---------------------------------------------------------------------------
 
 function generateComponentSfc(schema: ComponentSchema, typescript: boolean): string {
   const lines: string[] = [];
 
-  // <script setup>
   const lang = typescript ? ' lang="ts"' : '';
   lines.push(`<script setup${lang}>`);
 
   if (schema.props.length > 0) {
     if (typescript) {
-      // Use defineProps with TypeScript interface
       lines.push('');
       lines.push(`interface ${schema.name}Props {`);
       for (const prop of schema.props) {
@@ -109,7 +113,6 @@ function generateComponentSfc(schema: ComponentSchema, typescript: boolean): str
       lines.push('}');
       lines.push('');
 
-      // Build withDefaults if any props have defaults
       const propsWithDefaults = schema.props.filter(p => p.default !== undefined);
       if (propsWithDefaults.length > 0) {
         lines.push(`const props = withDefaults(defineProps<${schema.name}Props>(), {`);
@@ -121,15 +124,14 @@ function generateComponentSfc(schema: ComponentSchema, typescript: boolean): str
         lines.push(`const props = defineProps<${schema.name}Props>();`);
       }
     } else {
-      // JavaScript defineProps
       lines.push('');
       lines.push('const props = defineProps({');
       for (const prop of schema.props) {
         const type = propTypeToVueType(prop.type);
-        const parts: string[] = [`type: ${type}`];
-        if (prop.required) parts.push('required: true');
-        if (prop.default !== undefined) parts.push(`default: ${JSON.stringify(prop.default)}`);
-        lines.push(`  ${prop.name}: { ${parts.join(', ')} },`);
+        const propParts: string[] = [`type: ${type}`];
+        if (prop.required) propParts.push('required: true');
+        if (prop.default !== undefined) propParts.push(`default: ${JSON.stringify(prop.default)}`);
+        lines.push(`  ${prop.name}: { ${propParts.join(', ')} },`);
       }
       lines.push('});');
     }
@@ -138,17 +140,15 @@ function generateComponentSfc(schema: ComponentSchema, typescript: boolean): str
   lines.push('</script>');
   lines.push('');
 
-  // <template>
   lines.push('<template>');
   if (schema.template) {
-    const tmpl = templateToVue(schema.template, schema);
+    const tmpl = templateToVue(schema.template);
     lines.push(`  ${tmpl}`);
   } else {
     lines.push(`  <div class="${toKebabCase(schema.name)}"><!-- ${schema.name} --></div>`);
   }
   lines.push('</template>');
 
-  // <style scoped> if component has styles
   if (schema.styles) {
     lines.push('');
     lines.push('<style scoped>');
@@ -164,19 +164,17 @@ function generateComponentSfc(schema: ComponentSchema, typescript: boolean): str
 // ---------------------------------------------------------------------------
 
 function generatePageSfc(
-  doc: Z10Document,
-  root: Z10Node,
-  name: string,
+  root: Element,
+  _name: string,
   typescript: boolean,
   componentNames: string[],
 ): string {
   const lines: string[] = [];
   const lang = typescript ? ' lang="ts"' : '';
 
-  // Collect component imports needed
-  const usedComponents = collectUsedComponents(doc, root);
+  // Collect component imports
+  const usedComponents = collectUsedComponents(root);
 
-  // <script setup>
   if (usedComponents.size > 0) {
     lines.push(`<script setup${lang}>`);
     for (const compName of usedComponents) {
@@ -186,21 +184,21 @@ function generatePageSfc(
     lines.push('');
   }
 
-  // <template>
   lines.push('<template>');
-  lines.push(renderNode(doc, root, 1));
+  lines.push(renderElement(root, 1));
   lines.push('</template>');
 
   return lines.join('\n');
 }
 
-function collectUsedComponents(doc: Z10Document, node: Z10Node): Set<string> {
+function collectUsedComponents(el: Element): Set<string> {
   const result = new Set<string>();
-  if (node.componentName) {
-    result.add(node.componentName);
+  const componentName = el.getAttribute('data-z10-component');
+  if (componentName) {
+    result.add(componentName);
   }
-  for (const child of getChildren(doc, node.id)) {
-    for (const name of collectUsedComponents(doc, child)) {
+  for (const child of Array.from(el.children)) {
+    for (const name of collectUsedComponents(child)) {
       result.add(name);
     }
   }
@@ -208,45 +206,51 @@ function collectUsedComponents(doc: Z10Document, node: Z10Node): Set<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Node Tree → Vue Template
+// DOM Element → Vue Template
 // ---------------------------------------------------------------------------
 
-function renderNode(doc: Z10Document, node: Z10Node, indent: number): string {
+function renderElement(el: Element, indent: number): string {
   const pad = '  '.repeat(indent);
-  const children = getChildren(doc, node.id);
+  const children = Array.from(el.children);
 
-  // If this is a component instance, render as component
-  if (node.componentName) {
-    return renderComponentInstance(node, indent);
+  const componentName = el.getAttribute('data-z10-component');
+  if (componentName) {
+    return renderComponentInstance(el, componentName, indent);
   }
 
-  // Build class and style attributes
-  const { className, style } = stylesToTailwind(node.styles);
-  const attrs = buildVueAttributes(node, className, style);
+  const tag = el.tagName.toLowerCase();
+  const styles = parseInlineStyle(el.getAttribute('style') || '');
+  const { className, style } = stylesToTailwind(styles);
+  const attrs = buildVueAttributes(el, className, style);
 
-  if (children.length === 0 && !node.textContent) {
-    return `${pad}<${node.tag}${attrs} />`;
+  const textContent = getDirectTextContent(el);
+
+  if (children.length === 0 && !textContent) {
+    return `${pad}<${tag}${attrs} />`;
   }
 
   const parts: string[] = [];
-  parts.push(`${pad}<${node.tag}${attrs}>`);
+  parts.push(`${pad}<${tag}${attrs}>`);
 
-  if (node.textContent) {
-    parts.push(`${pad}  ${escapeHtml(node.textContent)}`);
+  if (textContent) {
+    parts.push(`${pad}  ${escapeHtml(textContent)}`);
   }
 
   for (const child of children) {
-    parts.push(renderNode(doc, child, indent + 1));
+    parts.push(renderElement(child, indent + 1));
   }
 
-  parts.push(`${pad}</${node.tag}>`);
+  parts.push(`${pad}</${tag}>`);
   return parts.join('\n');
 }
 
-function renderComponentInstance(node: Z10Node, indent: number): string {
+function renderComponentInstance(el: Element, componentName: string, indent: number): string {
   const pad = '  '.repeat(indent);
-  const componentName = node.componentName!;
-  const props = node.componentProps ?? {};
+
+  const propsAttr = el.getAttribute('data-z10-props');
+  const props: Record<string, string | number | boolean> = propsAttr
+    ? JSON.parse(propsAttr)
+    : {};
 
   const propEntries = Object.entries(props);
   if (propEntries.length === 0) {
@@ -264,7 +268,7 @@ function renderComponentInstance(node: Z10Node, indent: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// CSS → Tailwind Conversion (shared logic with React export)
+// CSS → Tailwind Conversion
 // ---------------------------------------------------------------------------
 
 const TAILWIND_MAP: Record<string, Record<string, string> | ((value: string) => string | null)> = {
@@ -309,20 +313,8 @@ const TAILWIND_MAP: Record<string, Record<string, string> | ((value: string) => 
   },
   'width': (v) => mapSpacingValue('w', v),
   'height': (v) => mapSpacingValue('h', v),
-  'min-width': (v) => mapSpacingValue('min-w', v),
-  'min-height': (v) => mapSpacingValue('min-h', v),
-  'max-width': (v) => mapSpacingValue('max-w', v),
-  'max-height': (v) => mapSpacingValue('max-h', v),
   'padding': (v) => mapSpacingValue('p', v),
-  'padding-top': (v) => mapSpacingValue('pt', v),
-  'padding-right': (v) => mapSpacingValue('pr', v),
-  'padding-bottom': (v) => mapSpacingValue('pb', v),
-  'padding-left': (v) => mapSpacingValue('pl', v),
   'margin': (v) => mapSpacingValue('m', v),
-  'margin-top': (v) => mapSpacingValue('mt', v),
-  'margin-right': (v) => mapSpacingValue('mr', v),
-  'margin-bottom': (v) => mapSpacingValue('mb', v),
-  'margin-left': (v) => mapSpacingValue('ml', v),
   'gap': (v) => mapSpacingValue('gap', v),
   'border-radius': (v) => mapBorderRadius(v),
   'font-size': (v) => mapFontSize(v),
@@ -354,9 +346,7 @@ function pxToTailwind(px: number): string | null {
     0: '0', 1: 'px', 2: '0.5', 4: '1', 6: '1.5', 8: '2', 10: '2.5',
     12: '3', 14: '3.5', 16: '4', 20: '5', 24: '6', 28: '7', 32: '8',
     36: '9', 40: '10', 44: '11', 48: '12', 56: '14', 64: '16',
-    80: '20', 96: '24', 112: '28', 128: '32', 144: '36', 160: '40',
-    176: '44', 192: '48', 208: '52', 224: '56', 240: '60', 256: '64',
-    288: '72', 320: '80', 384: '96',
+    80: '20', 96: '24',
   };
   return scale[px] ?? null;
 }
@@ -376,13 +366,6 @@ function mapFontSize(value: string): string | null {
     '12px': 'text-xs', '14px': 'text-sm', '16px': 'text-base',
     '18px': 'text-lg', '20px': 'text-xl', '24px': 'text-2xl',
     '30px': 'text-3xl', '36px': 'text-4xl', '48px': 'text-5xl',
-    '60px': 'text-6xl', '72px': 'text-7xl', '96px': 'text-8xl',
-    '128px': 'text-9xl',
-    '0.75rem': 'text-xs', '0.875rem': 'text-sm', '1rem': 'text-base',
-    '1.125rem': 'text-lg', '1.25rem': 'text-xl', '1.5rem': 'text-2xl',
-    '1.875rem': 'text-3xl', '2.25rem': 'text-4xl', '3rem': 'text-5xl',
-    '3.75rem': 'text-6xl', '4.5rem': 'text-7xl', '6rem': 'text-8xl',
-    '8rem': 'text-9xl',
   };
   return map[value] ?? null;
 }
@@ -416,7 +399,7 @@ function stylesToTailwind(styles: StyleMap): { className: string; style: StyleMa
 // Vue Attribute Building
 // ---------------------------------------------------------------------------
 
-function buildVueAttributes(node: Z10Node, className: string, style: StyleMap): string {
+function buildVueAttributes(el: Element, className: string, style: StyleMap): string {
   const attrs: string[] = [];
 
   if (className) {
@@ -425,32 +408,23 @@ function buildVueAttributes(node: Z10Node, className: string, style: StyleMap): 
 
   const styleEntries = Object.entries(style);
   if (styleEntries.length > 0) {
-    const styleStr = styleEntries
-      .map(([prop, value]) => `${prop}: ${value}`)
-      .join('; ');
     attrs.push(`:style="{ ${styleEntries.map(([p, v]) => `'${p}': '${v}'`).join(', ')} }"`);
   }
 
-  // Add data attributes (except z10 internal ones)
-  for (const [key, value] of Object.entries(node.attributes)) {
-    if (key.startsWith('data-z10-')) continue;
-    attrs.push(`${key}="${escapeHtml(value)}"`);
+  for (let i = 0; i < el.attributes.length; i++) {
+    const attr = el.attributes[i];
+    if (attr.name.startsWith('data-z10-')) continue;
+    if (attr.name === 'style') continue;
+    if (attr.name === 'class') continue;
+    attrs.push(`${attr.name}="${escapeHtml(attr.value)}"`);
   }
 
   return attrs.length > 0 ? ' ' + attrs.join(' ') : '';
 }
 
-// ---------------------------------------------------------------------------
-// Template → Vue Conversion
-// ---------------------------------------------------------------------------
-
-function templateToVue(template: string, schema: ComponentSchema): string {
+function templateToVue(template: string): string {
   let tmpl = template.trim();
-
-  // Convert template variables {{propName}} to Vue interpolation {{ propName }}
-  // (Vue already uses {{ }}, but ensure proper spacing)
   tmpl = tmpl.replace(/\{\{(\w+)\}\}/g, '{{ $1 }}');
-
   return tmpl;
 }
 
@@ -458,15 +432,19 @@ function templateToVue(template: string, schema: ComponentSchema): string {
 // Tokens CSS Generation
 // ---------------------------------------------------------------------------
 
-function generateTokensCss(doc: Z10Document): string {
+function generateTokensCss(tokens: NonNullable<ExportContext['tokens']>): string {
   const lines: string[] = [];
   lines.push(':root {');
 
-  for (const token of doc.tokens.primitives.values()) {
-    lines.push(`  ${token.name}: ${token.value};`);
+  if (tokens.primitives) {
+    for (const token of tokens.primitives.values()) {
+      lines.push(`  ${token.name}: ${token.value};`);
+    }
   }
-  for (const token of doc.tokens.semantic.values()) {
-    lines.push(`  ${token.name}: ${token.value};`);
+  if (tokens.semantic) {
+    for (const token of tokens.semantic.values()) {
+      lines.push(`  ${token.name}: ${token.value};`);
+    }
   }
 
   lines.push('}');
@@ -476,6 +454,37 @@ function generateTokensCss(doc: Z10Document): string {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function parseInlineStyle(style: string): StyleMap {
+  const result: StyleMap = {};
+  for (const decl of style.split(';')) {
+    const trimmed = decl.trim();
+    if (!trimmed) continue;
+    const colonIdx = trimmed.indexOf(':');
+    if (colonIdx === -1) continue;
+    const prop = trimmed.slice(0, colonIdx).trim();
+    const value = trimmed.slice(colonIdx + 1).trim();
+    if (prop && value) result[prop] = value;
+  }
+  return result;
+}
+
+function getDirectTextContent(el: Element): string {
+  let text = '';
+  for (let i = 0; i < el.childNodes.length; i++) {
+    const child = el.childNodes[i];
+    if (child.nodeType === 3) {
+      text += child.textContent || '';
+    }
+  }
+  return text.trim();
+}
+
+function elementToComponentName(el: Element): string {
+  const id = el.getAttribute('data-z10-id');
+  const page = el.getAttribute('data-z10-page');
+  return toPascalCase(page || id || el.tagName.toLowerCase());
+}
 
 function propTypeToTs(type: string, options?: string[]): string {
   switch (type) {

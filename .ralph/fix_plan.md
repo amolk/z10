@@ -144,7 +144,7 @@ No backwards compat: the current MCP write tools (12 commands mapping to Z10Comm
 
 - [x] **E5. Delete obsolete core model** — Deleted `src/core/commands.ts` (Z10Command executor, 345 lines) and `tests/core/commands.test.ts` (21 tests). Removed all command type definitions from `src/core/types.ts` (NodeCommand, TextCommand, InstanceCommand, RepeatCommand, StyleCommand, MoveCommand, RemoveCommand, ComponentCommand, TokensCommand, BatchCommand, AttrCommand, WriteHtmlCommand, PageCommand, Z10Command union, CommandResult, CommandSuccess, CommandError, BatchResult — 132 lines). Removed `export * from './commands.js'` from `src/core/index.ts`. Kept: `types.ts` (Z10Document, Z10Node, and supporting types — still used by MCP read tools, format parser/serializer, exporters), `document.ts` (document manipulation functions), `config.ts`. 571 tests passing.
 
-- [ ] **E6. Migrate export system** — `src/export/` (React, Vue, Svelte exporters) currently operates on `Z10Document` / `Z10Node` types from `src/core/`. These types are deleted in E5. Rewrite exporters to work against DOM (happy-dom tree) instead. Input: DOM root element. Output: framework-specific code. Use `stripForExport` (A17) to get clean HTML, then transform.
+- [x] **E6. Migrate export system** — `src/export/` (React, Vue, Svelte exporters) currently operates on `Z10Document` / `Z10Node` types from `src/core/`. These types are deleted in E5. Rewrite exporters to work against DOM (happy-dom tree) instead. Input: DOM root element. Output: framework-specific code. Use `stripForExport` (A17) to get clean HTML, then transform.
 
 ---
 
