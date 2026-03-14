@@ -73,6 +73,12 @@ export { reconcileChildren } from './reconcile.js';
 // A17. Metadata stripping
 export { stripForAgent, stripForExport } from './strip.js';
 
+// F2. Rate limiting
+export {
+  RateLimiter, ConnectionRateLimiter,
+  type RateLimiterConfig, type RateLimitResult,
+} from './rate-limit.js';
+
 // B1-B4. Local Proxy
 export {
   LocalProxy,

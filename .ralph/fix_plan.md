@@ -152,7 +152,7 @@ No backwards compat: the current MCP write tools (12 commands mapping to Z10Comm
 
 - [x] **F1. Sandbox hardening** — Hardened `src/dom/sandbox.ts`: blocked all dangerous globals (globalThis, window, process, require, fetch, setTimeout, setInterval, WebSocket, XMLHttpRequest, etc. — all set to `undefined`). Froze built-in prototypes (Object, Array, String, Number, Boolean, Function, RegExp, Date, Error, Map, Set) inside VM context via `runInContext` init script. Whitelisted safe globals (JSON, Math, parseInt, etc.). CPU timeout already enforced (5s default). Added 17 tests in `tests/dom/sandbox.test.ts`. 588 tests passing. (§12.1)
 
-- [ ] **F2. Rate limiting** — Per-CLI-connection: 100 reads/s, 20 writes/s (configurable). Per-WebSocket: similar limits for human editor. (§12.3)
+- [x] **F2. Rate limiting** — Token bucket rate limiter in `src/dom/rate-limit.ts`. `RateLimiter` class with configurable maxTokens and refillRate. `ConnectionRateLimiter` provides per-connection read (100/s) and write (20/s) limits. Exported from `src/dom/index.ts`. 11 tests in `tests/dom/rate-limit.test.ts`. 599 tests passing. (§12.3)
 
 ---
 
