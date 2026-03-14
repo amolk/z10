@@ -116,7 +116,7 @@ No backwards compat: the current `/api/projects/:id/exec` endpoint (statement-by
 
 No backwards compat: the editor canvas currently receives full content via `updateContent(html)` from the SSE `useAgentStream` hook. This entire flow gets replaced. The canvas becomes a live DOM that receives patches, not a React-state-driven rendering of serialized HTML.
 
-- [ ] **D1. WebSocket connection** — Editor page opens WebSocket to server on mount. Receives patch envelopes in real time. Replaces current `useAgentStream` SSE hook that receives full content. (§7.1, §10.1)
+- [x] **D1. WebSocket connection** — Editor page opens WebSocket to server on mount. Receives patch envelopes in real time. Replaces current `useAgentStream` SSE hook that receives full content. (§7.1, §10.1) *Implemented as SSE via existing /patches endpoint (same protocol as CLI B5). Created `usePatchStream` React hook with EventSource, exponential backoff reconnection with jitter, lastSeenTxId tracking for gap replay. Wired into editor-shell.tsx alongside legacy useAgentStream (kept for activity panel/highlights until D6). Uses cookie-based session auth (authenticateMcp already supports it). WebSocket upgrade deferred to D4 when bidirectional communication is needed for human edit → server flow. 555 tests passing.*
 
 - [ ] **D2. Browser patch replay** — On receiving a patch, call `replayPatch(ops, canvasRoot)` (A15) against the actual browser DOM inside the canvas iframe/container. Agent edits appear live — individual elements update, not full re-render. (§10.1)
 

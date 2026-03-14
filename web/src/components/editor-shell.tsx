@@ -6,6 +6,7 @@ import { useKeyboardShortcuts } from "@/lib/use-keyboard-shortcuts";
 import { useAutoSave } from "@/lib/use-auto-save";
 import { useUndoRedo } from "@/lib/use-undo-redo";
 import { useAgentStream } from "@/lib/use-agent-stream";
+import { usePatchStream } from "@/lib/use-patch-stream";
 import { ToolsToolbar } from "@/components/tools-toolbar";
 import { LayersPanel } from "@/components/layers-panel";
 import { EditorCanvas } from "@/components/editor-canvas";
@@ -14,7 +15,9 @@ import { ConnectAgentButton } from "@/components/connect-agent-button";
 import { useAgentHighlight } from "@/lib/use-agent-highlight";
 import { AgentActivityPanel } from "@/components/agent-activity-panel";
 import { useEditor } from "@/lib/editor-state";
+import { useCallback } from "react";
 import { PanelLeft, PanelRight, Sun, Moon } from "lucide-react";
+import type { PatchEnvelope } from "@/lib/use-patch-stream";
 
 export function EditorShell({
   projectId,
@@ -48,6 +51,23 @@ function EditorShellInner({
   useKeyboardShortcuts();
   useUndoRedo();
   const { saveState } = useAutoSave(projectId, initialContent);
+
+  // D1: Patch-based real-time connection (replaces full-content SSE)
+  // Patch replay into canvas DOM happens in D2; for now, connection + tracking only
+  const handlePatch = useCallback((patch: PatchEnvelope) => {
+    // D2 will wire replayPatch(patch.ops, canvasRoot) here
+    void patch;
+  }, []);
+  const handleResync = useCallback((_html: string, _txId: number) => {
+    // D2/D3 will wire full DOM replacement here
+  }, []);
+  const { connectionState: patchConnectionState } = usePatchStream(
+    projectId,
+    handlePatch,
+    handleResync,
+  );
+
+  // Legacy agent stream — kept for activity panel + highlights until D6
   const { connectionState, lastOperation, operations, clearOperations } =
     useAgentStream(projectId);
   useAgentHighlight(lastOperation);
@@ -118,7 +138,7 @@ function EditorShellInner({
           <div className="mx-1 h-4 w-px" style={{ backgroundColor: "var(--ed-panel-border)" }} />
           <ConnectAgentButton
             projectId={projectId}
-            connectionState={connectionState}
+            connectionState={patchConnectionState === "connected" ? patchConnectionState : connectionState}
             lastTool={lastOperation?.tool ?? null}
           />
         </div>
