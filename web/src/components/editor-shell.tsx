@@ -5,7 +5,6 @@ import { EditorProvider } from "@/lib/editor-state";
 import { useKeyboardShortcuts } from "@/lib/use-keyboard-shortcuts";
 import { useAutoSave } from "@/lib/use-auto-save";
 import { useUndoRedo } from "@/lib/use-undo-redo";
-import { useAgentStream } from "@/lib/use-agent-stream";
 import { usePatchStream } from "@/lib/use-patch-stream";
 import { useCanvasPatchReplay } from "@/lib/use-canvas-patch-replay";
 import { useTransact } from "@/lib/use-transact";
@@ -15,8 +14,6 @@ import { LayersPanel } from "@/components/layers-panel";
 import { EditorCanvas } from "@/components/editor-canvas";
 import { PropertiesPanel } from "@/components/properties-panel";
 import { ConnectAgentButton } from "@/components/connect-agent-button";
-import { useAgentHighlight } from "@/lib/use-agent-highlight";
-import { AgentActivityPanel } from "@/components/agent-activity-panel";
 import { useEditor } from "@/lib/editor-state";
 import { PanelLeft, PanelRight, Sun, Moon } from "lucide-react";
 
@@ -85,17 +82,12 @@ function EditorShellInner({
   );
 
   // D1+D4: Patch-based real-time connection with self-dedup
-  const { connectionState: patchConnectionState } = usePatchStream(
+  const { connectionState } = usePatchStream(
     projectId,
     handlePatch,
     handleResync,
     isOwnTx,
   );
-
-  // Legacy agent stream — kept for activity panel + highlights until D6
-  const { connectionState, lastOperation, operations, clearOperations } =
-    useAgentStream(projectId);
-  useAgentHighlight(lastOperation);
 
   return (
     <div className="flex h-screen flex-col">
@@ -155,8 +147,8 @@ function EditorShellInner({
           <div className="mx-1 h-4 w-px" style={{ backgroundColor: "var(--ed-panel-border)" }} />
           <ConnectAgentButton
             projectId={projectId}
-            connectionState={patchConnectionState === "connected" ? patchConnectionState : connectionState}
-            lastTool={lastOperation?.tool ?? null}
+            connectionState={connectionState}
+            lastTool={null}
           />
         </div>
       </header>
@@ -168,12 +160,6 @@ function EditorShellInner({
 
         <div className="relative flex-1">
           <EditorCanvas initialContent={initialContent} saveState={saveState} />
-
-          <AgentActivityPanel
-            operations={operations}
-            connectionState={connectionState}
-            onClear={clearOperations}
-          />
         </div>
 
         {rightPanelVisible && <PropertiesPanel />}

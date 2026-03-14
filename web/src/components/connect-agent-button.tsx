@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Plus } from "lucide-react";
-import type { AgentConnectionState } from "@/lib/use-agent-stream";
+import type { PatchConnectionState } from "@/lib/use-patch-stream";
 
 type ClientTab = "claude-code" | "cursor" | "other";
 
@@ -12,7 +12,7 @@ export function ConnectAgentButton({
   lastTool,
 }: {
   projectId: string;
-  connectionState: AgentConnectionState;
+  connectionState: PatchConnectionState;
   lastTool: string | null;
 }) {
   const [open, setOpen] = useState(false);

@@ -20,7 +20,7 @@ import { db } from "@/db";
 import { projects, users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { projectEvents, classifyTool, extractAffectedIds } from "@/lib/project-events";
+
 import { incrementMcpCalls, checkMcpLimit } from "@/lib/usage";
 import type { PlanId } from "@/lib/plans";
 
@@ -296,19 +296,6 @@ function createMcpServerForSession(state: McpSessionState): McpServer {
         }
         const result = handleWriteTool(state.doc!, tool.name, args);
         await saveToDb(state);
-        if (state.selectedProjectId && state.doc) {
-          const html = serializeZ10Html(state.doc);
-          projectEvents.emit({
-            type: "content-updated",
-            projectId: state.selectedProjectId,
-            content: html,
-            tool: tool.name,
-            operation: classifyTool(tool.name),
-            affectedIds: extractAffectedIds(tool.name, args),
-            toolResult: result,
-            timestamp: new Date().toISOString(),
-          });
-        }
         return { content: [{ type: "text" as const, text: result }] };
       }
     );

@@ -16,7 +16,8 @@ import { authenticateMcp } from "@/lib/mcp-auth";
 import { db } from "@/db";
 import { projects, users } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
-import { projectEvents, classifyTool, extractAffectedIds } from "@/lib/project-events";
+
+
 import { incrementMcpCalls, checkMcpLimit } from "@/lib/usage";
 import type { PlanId } from "@/lib/plans";
 
@@ -164,17 +165,6 @@ function createMcpServerForDoc(pd: ProjectDoc): McpServer {
       async (args: any) => {
         const result = handleWriteTool(doc, tool.name, args);
         await saveToDb();
-        const html = serializeZ10Html(doc);
-        projectEvents.emit({
-          type: "content-updated",
-          projectId,
-          content: html,
-          tool: tool.name,
-          operation: classifyTool(tool.name),
-          affectedIds: extractAffectedIds(tool.name, args),
-          toolResult: result,
-          timestamp: new Date().toISOString(),
-        });
         return { content: [{ type: "text" as const, text: result }] };
       }
     );
