@@ -102,7 +102,7 @@ No backwards compat: the current `/api/projects/:id/exec` endpoint (statement-by
 
 - [ ] **C3. Patch broadcast** — On each commit, broadcast patch envelope to all connected clients. Server→CLI: SSE (reuse/replace existing `events` endpoint). Server→WebUI: WebSocket. Same patch format for both. Replaces current `ProjectEventBus` that sends full serialized content. (§7.1, §7.2)
 
-- [ ] **C4. Initial sync endpoint** — `GET /api/projects/:id/sync` → full serialized document (outerHTML with all `data-z10-id` + `data-z10-ts-*`) + current `txId`. New clients bootstrap from this, then subscribe to patch stream. Replaces current `/api/projects/:id/dom` (which returns stripped HTML + checksum). (§7.5)
+- [x] **C4. Initial sync endpoint** — `GET /api/projects/:id/sync` → full serialized document (outerHTML with all `data-z10-id` + `data-z10-ts-*`) + current `txId`. New clients bootstrap from this, then subscribe to patch stream. Replaces current `/api/projects/:id/dom` (which returns stripped HTML + checksum). (§7.5)
 
 - [ ] **C5. Reconnection protocol** — SSE/WebSocket reconnection: client sends `lastSeenTxId`. Server replays from ring buffer (A16). If gap exceeds buffer: send full document (same as C4). (§7.4)
 
