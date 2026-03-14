@@ -26,16 +26,17 @@ import type { PlanId } from "@/lib/plans";
 
 import {
   READ_TOOLS,
-  WRITE_TOOLS,
+  DOM_TOOLS,
   UTILITY_TOOLS,
   handleReadTool,
-  handleWriteTool,
+  handleDomTool,
   handleUtilityTool,
   jsonSchemaToZodShape,
   parseZ10Html,
   serializeZ10Html,
   createDocument,
 } from "z10";
+import { LocalProxy } from "z10/dom";
 
 // ---------------------------------------------------------------------------
 // Session state per MCP connection
@@ -45,6 +46,7 @@ type McpSessionState = {
   userId: string;
   selectedProjectId: string | null;
   doc: ReturnType<typeof createDocument> | null;
+  proxy: LocalProxy | null;
 };
 
 type McpSessionEntry = {
@@ -93,6 +95,13 @@ async function loadProject(state: McpSessionState, projectId: string) {
 
   state.selectedProjectId = projectId;
   state.doc = doc;
+
+  // Initialize LocalProxy with document HTML for DOM tools
+  const proxy = new LocalProxy();
+  const docHtml = serializeZ10Html(doc);
+  proxy.loadDocument(docHtml);
+  state.proxy = proxy;
+
   return project;
 }
 
@@ -283,7 +292,7 @@ function createMcpServerForSession(state: McpSessionState): McpServer {
     );
   }
 
-  for (const tool of WRITE_TOOLS) {
+  for (const tool of DOM_TOOLS) {
     const zodShape = jsonSchemaToZodShape(tool.inputSchema);
     mcpServer.tool(
       tool.name,
@@ -294,8 +303,23 @@ function createMcpServerForSession(state: McpSessionState): McpServer {
         try { requireProject(); } catch (e) {
           return { content: [{ type: "text" as const, text: (e as Error).message }], isError: true };
         }
-        const result = handleWriteTool(state.doc!, tool.name, args);
-        await saveToDb(state);
+        const result = await handleDomTool(state.proxy!, tool.name, args);
+
+        // Auto-save after successful submit_code
+        if (tool.name === "submit_code") {
+          try {
+            const parsed = JSON.parse(result);
+            if (parsed.status === "committed") {
+              // Sync proxy DOM back to Z10Document for read tools
+              const proxyHtml = state.proxy!.getFullHtml();
+              state.doc = parseZ10Html(
+                `<!DOCTYPE html><html><head></head><body>${proxyHtml}</body></html>`
+              );
+              await saveToDb(state);
+            }
+          } catch { /* ignore sync errors */ }
+        }
+
         return { content: [{ type: "text" as const, text: result }] };
       }
     );
@@ -376,6 +400,7 @@ async function handleMcpRequest(request: Request): Promise<Response> {
       userId: authed.userId,
       selectedProjectId: null,
       doc: null,
+      proxy: null,
     };
     const mcpServer = createMcpServerForSession(state);
     const transport = new WebStandardStreamableHTTPServerTransport({

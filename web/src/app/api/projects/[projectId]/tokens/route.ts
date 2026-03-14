@@ -47,12 +47,12 @@ export async function GET(
 
   const primitives: Record<string, string> = {};
   for (const [k, v] of doc.tokens.primitives) {
-    primitives[k] = v;
+    primitives[k] = v.value;
   }
 
   const semantic: Record<string, string> = {};
   for (const [k, v] of doc.tokens.semantic) {
-    semantic[k] = v;
+    semantic[k] = v.value;
   }
 
   return NextResponse.json({ primitives, semantic });

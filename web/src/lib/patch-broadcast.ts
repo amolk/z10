@@ -11,7 +11,7 @@
  * §7.1, §7.2
  */
 
-import type { PatchEnvelope } from "../../../src/dom/index.js";
+import type { PatchEnvelope } from "@/lib/z10-dom";
 
 export type PatchListener = (patch: PatchEnvelope) => void;
 

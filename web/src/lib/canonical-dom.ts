@@ -13,7 +13,6 @@
  */
 
 import { Window } from "happy-dom";
-// Import from source when available (dev/test), from built package in production
 import {
   LamportClock,
   TransactionEngine,
@@ -21,8 +20,8 @@ import {
   type TransactionResult,
   type TimestampManifest,
   type PatchEnvelope,
-} from "../../../src/dom/index.js";
-import { patchBroadcast } from "./patch-broadcast.js";
+} from "z10/dom";
+import { patchBroadcast } from "./patch-broadcast";
 
 // ── Types ──
 
@@ -146,6 +145,31 @@ export function loadCanonicalDOM(
     const maxTs = scanMaxTimestamp(rootElement);
     if (maxTs > 0) {
       clock.receive(maxTs);
+    }
+
+    // Ensure the root element (body) always has a data-z10-id.
+    // When loading from DB, innerHTML sets children (which have IDs) but the
+    // body itself loses its ID. Without it, serializeMutationsToOps skips
+    // body-level childList mutations, causing patches to miss top-level
+    // add/remove ops. The browser then either goes stale or goes blank.
+    if (!rootElement.getAttribute("data-z10-id")) {
+      // Find max existing ID counter to avoid collisions
+      let maxCounter = 0;
+      const allElements = rootElement.querySelectorAll("[data-z10-id]");
+      for (let i = 0; i < allElements.length; i++) {
+        const nid = (allElements[i] as Element).getAttribute("data-z10-id");
+        if (nid && nid.startsWith("n")) {
+          const num = parseInt(nid.slice(1), 10);
+          if (!isNaN(num) && num > maxCounter) maxCounter = num;
+        }
+      }
+      rootElement.setAttribute("data-z10-id", `n${maxCounter + 1}`);
+      // Set timestamps so the body participates in conflict detection
+      const ts = clock.value;
+      rootElement.setAttribute("data-z10-ts-node", String(ts));
+      rootElement.setAttribute("data-z10-ts-children", String(ts));
+      rootElement.setAttribute("data-z10-ts-text", String(ts));
+      rootElement.setAttribute("data-z10-ts-tree", String(ts));
     }
   }
 

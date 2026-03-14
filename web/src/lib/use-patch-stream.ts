@@ -22,10 +22,7 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import type {
-  PatchEnvelope,
-  PatchOp,
-} from "../../../src/dom/patch-serialize.js";
+import type { PatchEnvelope, PatchOp } from "@/lib/z10-dom";
 
 export type PatchConnectionState = "disconnected" | "connecting" | "connected";
 

@@ -24,10 +24,10 @@ import type { PlanId } from "@/lib/plans";
 // Import core z10 library (added as file dependency, excluded from bundling via serverExternalPackages)
 import {
   READ_TOOLS,
-  WRITE_TOOLS,
+  DOM_TOOLS,
   UTILITY_TOOLS,
   handleReadTool,
-  handleWriteTool,
+  handleDomTool,
   handleUtilityTool,
   jsonSchemaToZodShape,
   parseZ10Html,
@@ -35,6 +35,7 @@ import {
   createDocument,
   createDocumentWithPage,
 } from "z10";
+import { LocalProxy } from "z10/dom";
 
 // ---------------------------------------------------------------------------
 // Per-project document cache (shared across MCP sessions for same project)
@@ -42,6 +43,7 @@ import {
 
 type ProjectDoc = {
   doc: ReturnType<typeof createDocument>;
+  proxy: LocalProxy;
   projectId: string;
   ownerId: string;
   lastAccess: number;
@@ -110,7 +112,12 @@ async function getOrCreateDoc(
     doc = createDocumentWithPage();
   }
 
-  const pd: ProjectDoc = { doc, projectId, ownerId, lastAccess: Date.now() };
+  // Initialize LocalProxy with document HTML for DOM tools
+  const proxy = new LocalProxy();
+  const docHtml = serializeZ10Html(doc);
+  proxy.loadDocument(docHtml);
+
+  const pd: ProjectDoc = { doc, proxy, projectId, ownerId, lastAccess: Date.now() };
   projectDocs.set(projectId, pd);
   return pd;
 }
@@ -154,8 +161,8 @@ function createMcpServerForDoc(pd: ProjectDoc): McpServer {
     );
   }
 
-  // Register write tools (with auto-save + event emission)
-  for (const tool of WRITE_TOOLS) {
+  // Register DOM tools (E4: replaces old write tools)
+  for (const tool of DOM_TOOLS) {
     const zodShape = jsonSchemaToZodShape(tool.inputSchema);
     mcpServer.tool(
       tool.name,
@@ -163,8 +170,23 @@ function createMcpServerForDoc(pd: ProjectDoc): McpServer {
       zodShape,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       async (args: any) => {
-        const result = handleWriteTool(doc, tool.name, args);
-        await saveToDb();
+        const result = await handleDomTool(pd.proxy, tool.name, args);
+
+        // Auto-save after successful submit_code
+        if (tool.name === "submit_code") {
+          try {
+            const parsed = JSON.parse(result);
+            if (parsed.status === "committed") {
+              // Sync proxy DOM back to Z10Document for read tools
+              const proxyHtml = pd.proxy.getFullHtml();
+              pd.doc = parseZ10Html(
+                `<!DOCTYPE html><html><head></head><body>${proxyHtml}</body></html>`
+              );
+              await saveToDb();
+            }
+          } catch { /* ignore sync errors */ }
+        }
+
         return { content: [{ type: "text" as const, text: result }] };
       }
     );

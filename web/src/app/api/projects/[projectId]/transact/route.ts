@@ -31,7 +31,7 @@ import {
   buildManifest,
   serializeManifest,
   type SerializedManifest,
-} from "../../../../../src/dom/index.js";
+} from "z10/dom";
 
 // Ensure canonical DOM manager is configured with DB persistence
 let configured = false;
@@ -121,7 +121,7 @@ export async function POST(
     const result = await executeTransaction(
       projectId,
       body.code,
-      body.subtreeRootNid,
+      body.subtreeRootNid ?? null,
       manifest,
     );
 

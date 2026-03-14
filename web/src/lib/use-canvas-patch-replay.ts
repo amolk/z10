@@ -15,8 +15,7 @@
  */
 
 import { useCallback, type RefObject } from "react";
-import { replayPatch } from "../../../src/dom/patch-replay.js";
-import type { PatchEnvelope } from "../../../src/dom/patch-serialize.js";
+import { replayPatch, type PatchEnvelope } from "@/lib/z10-dom";
 
 /**
  * Creates patch and resync handlers that replay against the canvas DOM.
