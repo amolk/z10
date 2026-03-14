@@ -172,14 +172,87 @@ export function summarizeStatement(statement: string): string {
   return oneLine.slice(0, 77) + '...';
 }
 
-// ── New exec flow (B8) ──
+// ── Retry with backoff (E2) ──
+
+/** Options for retry with exponential backoff + jitter. */
+export interface RetryOptions {
+  maxAttempts: number;
+  baseDelayMs: number;
+  maxDelayMs: number;
+  jitterMs: number;
+}
+
+const DEFAULT_RETRY: RetryOptions = {
+  maxAttempts: 5,
+  baseDelayMs: 100,
+  maxDelayMs: 5_000,
+  jitterMs: 50,
+};
+
+/**
+ * Compute delay for exponential backoff with jitter.
+ * Formula: min(baseDelay * 2^attempt + random(0, jitter), maxDelay)
+ */
+export function computeRetryDelay(attempt: number, opts: RetryOptions): number {
+  const exponential = opts.baseDelayMs * Math.pow(2, attempt);
+  const jitter = Math.random() * opts.jitterMs;
+  return Math.min(exponential + jitter, opts.maxDelayMs);
+}
+
+/**
+ * Submit code with automatic retry on conflict rejection.
+ * On conflict: uses the fresh ticket from the rejection result, waits with
+ * exponential backoff + jitter, then retries. Transparent to the agent.
+ *
+ * Non-conflict rejections (code errors) are NOT retried — the same code
+ * would fail again.
+ */
+export async function submitWithRetry(
+  proxy: { submitCode: (code: string, ticketId: string) => Promise<import('../dom/proxy.js').SubmitResult> },
+  code: string,
+  ticketId: string,
+  opts: RetryOptions = DEFAULT_RETRY,
+): Promise<import('../dom/proxy.js').SubmitResult> {
+  let currentTicketId = ticketId;
+
+  for (let attempt = 0; attempt < opts.maxAttempts; attempt++) {
+    const result = await proxy.submitCode(code, currentTicketId);
+
+    if (result.status === 'committed') {
+      return result;
+    }
+
+    // Only retry on conflict rejections — code errors won't resolve with retry
+    const isConflict = result.conflicts && result.conflicts.length > 0;
+    if (!isConflict) {
+      return result;
+    }
+
+    // Last attempt — return the rejection, don't wait
+    if (attempt === opts.maxAttempts - 1) {
+      return result;
+    }
+
+    // Use the fresh ticket from the rejection for retry
+    currentTicketId = result.newTicketId;
+
+    // Wait with exponential backoff + jitter
+    const delay = computeRetryDelay(attempt, opts);
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+
+  // Unreachable, but satisfies TypeScript
+  throw new Error('Retry loop exited unexpectedly');
+}
+
+// ── New exec flow (B8 + E2) ──
 
 /**
  * CLI entry point for `z10 exec [--project <id>] [--page <id>]`.
  * Reads JavaScript from stdin and executes via the collaborative DOM.
  *
- * New flow: read stdin → get project connection → getSubtree + ticket
- * → submitCode(code, ticketId) → print result.
+ * Flow: read stdin → get project connection → getSubtree + ticket
+ * → submitCode with retry on conflict → print result.
  */
 export async function cmdExec(args: string[]): Promise<void> {
   const session = await loadSession();
@@ -216,8 +289,8 @@ export async function cmdExec(args: string[]): Promise<void> {
   const selector = pageId ? `[data-z10-id="${pageId}"]` : '[data-z10-id]';
   const subtree = conn.proxy.getSubtree(selector);
 
-  // Submit code for execution via the collaborative DOM transaction engine
-  const result = await conn.proxy.submitCode(source, subtree.ticketId);
+  // Submit code with automatic retry on conflict (E2)
+  const result = await submitWithRetry(conn.proxy, source, subtree.ticketId);
 
   if (result.status === 'committed') {
     console.log(`✓ Executed (txId: ${result.txId})`);
@@ -228,7 +301,7 @@ export async function cmdExec(args: string[]): Promise<void> {
         console.error(`  Conflict: ${JSON.stringify(conflict)}`);
       }
     }
-    if (result.freshHtml) {
+    if (result.html) {
       console.error('  Fresh HTML available — subtree was modified concurrently.');
     }
     process.exit(1);
