@@ -1561,13 +1561,21 @@ function SelectionOverlay({
 
 // ─── Memoized page content to prevent DOM replacement on hover/selection state changes ───
 
+/**
+ * D3: Ref-based page content. Sets innerHTML once on mount, then the live DOM
+ * is mutated directly by replayPatch (A15). React does not own this DOM content.
+ * On page switch, key={activePage.id} on the parent causes unmount/remount,
+ * so innerHTML is re-set from the new page's HTML.
+ */
 const PageContent = memo(function PageContent({ html }: { html: string }) {
-  return (
-    <div
-      className="rounded-sm shadow-2xl"
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
-  );
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (ref.current) {
+      ref.current.innerHTML = html;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally mount-only; patches handle subsequent updates
+  }, []);
+  return <div ref={ref} className="rounded-sm shadow-2xl" />;
 });
 
 // ─── Parse .z10.html into page artboards ─────────────────────

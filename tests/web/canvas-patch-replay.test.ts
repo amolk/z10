@@ -1,10 +1,13 @@
 /**
- * D2. Tests for browser patch replay.
+ * D2 + D3. Tests for browser patch replay and canvas architecture.
  *
  * Verifies that replayPatch (A15) correctly applies patch ops to a
- * browser-like DOM, as used by the editor canvas. These tests use
- * happy-dom (via vitest) to simulate the browser DOM that the canvas
- * iframe contains.
+ * browser-like DOM, as used by the editor canvas. D3 tests verify that
+ * the live DOM can be inspected after patches for layer tree derivation
+ * and that resync via innerHTML replacement works correctly.
+ *
+ * These tests use happy-dom (via vitest) to simulate the browser DOM
+ * that the canvas iframe contains.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -147,5 +150,102 @@ describe('canvas patch replay', () => {
     replayPatch(envelope.ops, root);
     expect(root.querySelector('[data-z10-id="title"]')?.textContent).toBe('From Envelope');
     expect(root.querySelector('[data-z10-id="card"]')?.getAttribute('data-z10-intent')).toBe('hero');
+  });
+
+  // ─── D3: Canvas architecture tests ─────────────────────────────
+
+  describe('D3 live DOM inspection after patches', () => {
+    it('should reflect patched state when querying DOM for layer tree', () => {
+      // Simulate: patch adds a new element, then we inspect the DOM
+      // (as refreshLayersFromDOM would do)
+      const ops: PatchOp[] = [
+        { op: 'text', id: 'title', value: 'Patched Title' },
+        {
+          op: 'add',
+          parentId: 'card',
+          html: '<div data-z10-id="badge" data-z10-node="Frame"><span data-z10-id="badge-text">New</span></div>',
+          before: null,
+        },
+      ];
+      replayPatch(ops, root);
+
+      // Inspect DOM like refreshLayersFromDOM does
+      const pageEl = root.querySelector('[data-z10-page]');
+      expect(pageEl).not.toBeNull();
+
+      // Verify the new element is in the DOM tree
+      const allIds = Array.from(root.querySelectorAll('[data-z10-id]')).map(
+        (el) => el.getAttribute('data-z10-id'),
+      );
+      expect(allIds).toContain('badge');
+      expect(allIds).toContain('badge-text');
+
+      // Verify text was updated
+      expect(root.querySelector('[data-z10-id="title"]')?.textContent).toBe('Patched Title');
+
+      // Verify parent-child structure
+      const badge = root.querySelector('[data-z10-id="badge"]');
+      expect(badge?.parentElement?.getAttribute('data-z10-id')).toBe('card');
+      expect(badge?.children.length).toBe(1);
+      expect(badge?.children[0].getAttribute('data-z10-id')).toBe('badge-text');
+    });
+
+    it('should correctly identify page element for layer derivation after remove ops', () => {
+      const ops: PatchOp[] = [{ op: 'remove', id: 'desc' }];
+      replayPatch(ops, root);
+
+      // The page element should still be findable
+      const pageEl = root.querySelector('[data-z10-page]');
+      expect(pageEl).not.toBeNull();
+      expect(pageEl?.getAttribute('data-z10-page')).toBe('Page 1');
+
+      // The card should now have only one child (title)
+      const card = root.querySelector('[data-z10-id="card"]')!;
+      const childIds = Array.from(card.children).map((c) => c.getAttribute('data-z10-id'));
+      expect(childIds).toEqual(['title']);
+    });
+  });
+
+  describe('D3 resync via innerHTML replacement', () => {
+    it('should replace page content via innerHTML (simulating handleResync)', () => {
+      // Simulate the resync flow: find the page container and replace its innerHTML
+      const pageContainer = root.querySelector('[data-z10-page]')?.parentElement;
+      expect(pageContainer).not.toBeNull();
+
+      const resyncHtml = `<div data-z10-page="Page 1" data-z10-id="page" style="width: 1440px; min-height: 900px;">
+        <div data-z10-id="hero" style="padding: 32px; background: navy;">
+          <h1 data-z10-id="heading">Resynced Content</h1>
+        </div>
+      </div>`;
+
+      pageContainer!.innerHTML = resyncHtml;
+
+      // Verify old elements are gone
+      expect(root.querySelector('[data-z10-id="card"]')).toBeNull();
+      expect(root.querySelector('[data-z10-id="title"]')).toBeNull();
+
+      // Verify new elements are present
+      expect(root.querySelector('[data-z10-id="hero"]')).not.toBeNull();
+      expect(root.querySelector('[data-z10-id="heading"]')?.textContent).toBe('Resynced Content');
+      expect(root.querySelector('[data-z10-page]')?.getAttribute('data-z10-page')).toBe('Page 1');
+    });
+
+    it('should support patches on resynced DOM', () => {
+      // Resync
+      const pageContainer = root.querySelector('[data-z10-page]')?.parentElement;
+      pageContainer!.innerHTML = `<div data-z10-page="Page 1" data-z10-id="page" style="width: 1440px;">
+        <div data-z10-id="section"><p data-z10-id="para">Initial</p></div>
+      </div>`;
+
+      // Apply patch on top of resynced content
+      const ops: PatchOp[] = [
+        { op: 'text', id: 'para', value: 'After Resync Patch' },
+        { op: 'attr', id: 'section', name: 'class', value: 'updated' },
+      ];
+      replayPatch(ops, root);
+
+      expect(root.querySelector('[data-z10-id="para"]')?.textContent).toBe('After Resync Patch');
+      expect(root.querySelector('[data-z10-id="section"]')?.getAttribute('class')).toBe('updated');
+    });
   });
 });

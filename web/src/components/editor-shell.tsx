@@ -53,6 +53,7 @@ function EditorShellInner({
   const {
     transformRef,
     updateContent,
+    refreshLayersFromDOM,
     leftPanelVisible,
     rightPanelVisible,
     setLeftPanelVisible,
@@ -61,10 +62,12 @@ function EditorShellInner({
     toggleDarkMode,
   } = useEditor();
 
-  // D2: Patch replay — applies ops directly to canvas DOM via replayPatch(A15)
+  // D2+D3: Patch replay — applies ops directly to canvas DOM via replayPatch(A15),
+  // then refreshes layers panel from live DOM
   const { handlePatch, handleResync } = useCanvasPatchReplay(
     transformRef,
     updateContent,
+    refreshLayersFromDOM,
   );
 
   // D1: Patch-based real-time connection (replaces full-content SSE)

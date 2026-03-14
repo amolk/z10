@@ -98,6 +98,9 @@ export type EditorState = {
   /** True when the last content update came from an external source (skip auto-save) */
   isExternalUpdate: RefObject<boolean>;
 
+  /** Re-derive layers from the live DOM in transformRef (active page only). */
+  refreshLayersFromDOM: () => void;
+
   // Active page
   activePageId: string | null;
   setActivePageId: (id: string) => void;
@@ -343,6 +346,20 @@ export function EditorProvider({
     setSelectedIds(new Set());
   }, []);
 
+  // D3: Re-derive layers from the live DOM (active page only).
+  // Called after replayPatch mutates the canvas DOM so the layers panel stays in sync.
+  const refreshLayersFromDOM = useCallback(() => {
+    const root = transformRef.current;
+    if (!root) return;
+    const pageEl = root.querySelector("[data-z10-page]") as HTMLElement | null;
+    if (!pageEl) return;
+    _nodeCounter = 0;
+    const updatedPage = elementToNode(pageEl, 0);
+    setLayers((prev) =>
+      prev.map((l) => (l.id === updatedPage.id ? updatedPage : l)),
+    );
+  }, []);
+
   const addPage = useCallback(() => {
     const prev = content || initialContent;
     const parser = new DOMParser();
@@ -472,6 +489,7 @@ export function EditorProvider({
         content,
         updateElementStyle,
         updateContent,
+        refreshLayersFromDOM,
         isExternalUpdate,
         activePageId,
         setActivePageId,

@@ -8,10 +8,10 @@
  * server (happy-dom) and CLI (happy-dom). This means agent edits appear
  * live as individual element updates, not full re-renders.
  *
- * For resync events (gap too large on reconnect), falls back to full
- * content replacement via updateContent.
+ * For resync events (gap too large on reconnect), replaces the active
+ * page's DOM directly via innerHTML, then refreshes layers.
  *
- * §10.1
+ * §10.1, §10.5
  */
 
 import { useCallback, type RefObject } from "react";
@@ -22,8 +22,8 @@ import type { PatchEnvelope } from "../../../src/dom/patch-serialize.js";
  * Creates patch and resync handlers that replay against the canvas DOM.
  *
  * @param transformRef - Ref to the transform layer div containing the live DOM
- * @param updateContent - EditorState callback for full content replacement (resync)
- * @param refreshLayers - Optional callback to refresh the layers panel after patches
+ * @param updateContent - EditorState callback for full content replacement (fallback)
+ * @param refreshLayers - Callback to refresh the layers panel from live DOM after mutations
  */
 export function useCanvasPatchReplay(
   transformRef: RefObject<HTMLDivElement | null>,
@@ -38,7 +38,7 @@ export function useCanvasPatchReplay(
       // Apply ops directly to the live browser DOM
       replayPatch(patch.ops, root);
 
-      // Refresh layers panel to reflect DOM changes
+      // D3: Refresh layers panel from live DOM to reflect changes
       refreshLayers?.();
     },
     [transformRef, refreshLayers],
@@ -46,10 +46,20 @@ export function useCanvasPatchReplay(
 
   const handleResync = useCallback(
     (html: string, _txId: number) => {
-      // Full content replacement — React re-renders the canvas
+      const root = transformRef.current;
+      // D3: Try to replace DOM directly (avoids React re-render of PageContent)
+      if (root) {
+        const pageContainer = root.querySelector("[data-z10-page]")?.parentElement;
+        if (pageContainer) {
+          pageContainer.innerHTML = html;
+          refreshLayers?.();
+          return;
+        }
+      }
+      // Fallback: full React content replacement
       updateContent(html);
     },
-    [updateContent],
+    [transformRef, updateContent, refreshLayers],
   );
 
   return { handlePatch, handleResync };
