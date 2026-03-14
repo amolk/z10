@@ -38,7 +38,9 @@ export function createSandboxContext(clonedRoot: Element): object {
   const scopedDocument = {
     querySelector: (selector: string) => clonedRoot.querySelector(selector),
     querySelectorAll: (selector: string) => clonedRoot.querySelectorAll(selector),
-    getElementById: (id: string) => clonedRoot.querySelector(`#${CSS.escape(id)}`),
+    getElementById: (id: string) =>
+      clonedRoot.querySelector(`#${cssEscape(id)}`) ??
+      clonedRoot.querySelector(`[data-z10-id="${cssEscape(id)}"]`),
     createElement: (tag: string) => ownerDoc.createElement(tag),
     createTextNode: (text: string) => ownerDoc.createTextNode(text),
     createDocumentFragment: () => ownerDoc.createDocumentFragment(),
@@ -63,6 +65,10 @@ export function createSandboxContext(clonedRoot: Element): object {
       typeof CSS !== 'undefined' ? { escape: CSS.escape } : { escape: cssEscape },
     ),
     // Safe built-ins that agent code may need
+    // Note: constructors like Object, Array, Error etc. are NOT passed here.
+    // node:vm contexts get their own copies of these built-ins automatically.
+    // Passing the host's constructors would cause freezeBuiltins() to freeze
+    // the host process's prototypes, breaking Next.js and other libraries.
     JSON: Object.freeze({ parse: JSON.parse, stringify: JSON.stringify }),
     Math,
     parseInt,
@@ -71,18 +77,6 @@ export function createSandboxContext(clonedRoot: Element): object {
     isFinite,
     encodeURIComponent,
     decodeURIComponent,
-    Array,
-    Object,
-    String,
-    Number,
-    Boolean,
-    Map,
-    Set,
-    RegExp,
-    Date,
-    Error,
-    TypeError,
-    RangeError,
     // Explicitly undefined — block dangerous globals
     globalThis: undefined,
     window: undefined,
