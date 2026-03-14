@@ -138,7 +138,7 @@ No backwards compat: the current MCP write tools (12 commands mapping to Z10Comm
 
 - [x] **E2. Retry with backoff** — Added `submitWithRetry()` to `src/cli/exec.ts`: on conflict rejection, uses fresh `newTicketId` from rejection result, waits with exponential backoff + jitter (`min(baseDelay * 2^attempt + random(0, jitter), maxDelay)`), retries up to 5 attempts. Non-conflict rejections (code errors) are not retried. Also fixed `result.freshHtml` → `result.html` bug in cmdExec. 10 tests (`tests/cli/retry.test.ts`).
 
-- [ ] **E3. New `z10 exec` flow** — Simplified: read stdin JS → call `submitCode(code, currentTicketId)` → on commit: print updated HTML, store new ticket → on reject: print conflict info + fresh HTML, store new ticket → on error: print error. No acorn, no statement splitting, no checksums. Single round trip.
+- [x] **E3. New `z10 exec` flow** — Cleaned up `src/cli/exec.ts`: removed all legacy functions (`parseStatements`, `createExecEnvironment`, `executeStatement`, `summarizeStatement`) and their `acorn`/`happy-dom`/`node:vm` imports. Moved legacy functions to `src/cli/legacy-exec.ts` for MCP tool compatibility until E4. Enhanced `cmdExec` output: on commit prints updated HTML, on reject prints error details + fresh HTML. Updated MCP tools import to use `legacy-exec.ts`. Updated `tests/cli/exec.test.ts` import path.
 
 - [ ] **E4. MCP tool migration** — Replace 12 MCP write tools + `z10_exec` with: `submitCode(code, ticketId)` and `getSubtree(selector, depth?)` and `refreshSubtree(ticketId)`. The MCP server becomes a thin proxy to the CLI's local validation engine. Delete: `writeToolToCommand`, `executeCommand`, all individual write tool handlers.
 

@@ -24,7 +24,7 @@ import {
 import { exportReact } from '../export/react.js';
 import { exportVue } from '../export/vue.js';
 import { exportSvelte } from '../export/svelte.js';
-import { parseStatements, createExecEnvironment, executeStatement, summarizeStatement } from '../cli/exec.js';
+import { parseStatements, createExecEnvironment, executeStatement, summarizeStatement } from '../cli/legacy-exec.js';
 import { serializeZ10Html } from '../format/serializer.js';
 import { parseZ10Html } from '../format/parser.js';
 // checksum.ts deleted in B8 — stub until MCP tools are overhauled in Phase E

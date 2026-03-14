@@ -1,12 +1,12 @@
 /**
- * Tests for z10 exec — statement parsing, execution environment.
+ * Tests for legacy exec functions — statement parsing, execution environment.
  *
- * B8: Removed runExec (replaced by submitCode flow) and checksum tests
- * (checksum.ts deleted). Legacy functions kept for MCP tool compatibility.
+ * These test the legacy functions in legacy-exec.ts which are kept
+ * for MCP tool compatibility until E4 migrates them.
  */
 
 import { describe, it, expect } from 'vitest';
-import { parseStatements, createExecEnvironment, executeStatement, summarizeStatement } from '../../src/cli/exec.js';
+import { parseStatements, createExecEnvironment, executeStatement, summarizeStatement } from '../../src/cli/legacy-exec.js';
 
 describe('parseStatements', () => {
   it('should parse simple variable declarations', () => {
