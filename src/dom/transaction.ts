@@ -305,16 +305,17 @@ export class TransactionEngine {
       const liveNid = liveChild.getAttribute('data-z10-id');
       if (!liveNid) continue;
 
-      // Find matching sandbox child
-      const sandboxChild = sandboxRoot.querySelector(`[data-z10-id="${liveNid}"]`);
-      if (sandboxChild) {
-        this.syncAttributes(sandboxChild, liveChild);
-        // Recurse for text on leaf nodes
-        if (sandboxChild.children.length === 0 && liveChild.children.length === 0) {
-          if (sandboxChild.textContent !== liveChild.textContent) {
-            liveChild.textContent = sandboxChild.textContent;
-          }
+      // Find matching sandbox child (direct children only to avoid cross-level matches)
+      let sandboxChild: Element | null = null;
+      for (let j = 0; j < sandboxRoot.children.length; j++) {
+        const candidate = sandboxRoot.children[j] as Element;
+        if (candidate.getAttribute('data-z10-id') === liveNid) {
+          sandboxChild = candidate;
+          break;
         }
+      }
+      if (sandboxChild) {
+        this.applyChanges(sandboxChild, liveChild, ts, idGenerator);
       }
     }
   }
