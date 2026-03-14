@@ -50,9 +50,16 @@ export function useEditBridge(
     for (const [id, styles] of batch) {
       const code = generateStyleCode(id, styles);
       if (code) {
-        // Fire-and-forget — optimistic application already done
-        transactRef.current(code, pageIdRef.current).catch(() => {
-          // Rejection/error handling deferred to D5
+        // Fire-and-forget — optimistic application already done.
+        // D5: On rejection, the server's truth arrives via patch replay which
+        // updates the canvas DOM. The properties panel MutationObserver picks
+        // up the change automatically. We log for debugging.
+        transactRef.current(code, pageIdRef.current).then((result) => {
+          if (result.status === "rejected") {
+            console.warn("[edit-bridge] Transaction rejected:", result.reason);
+          } else if (result.status === "error") {
+            console.warn("[edit-bridge] Transaction error:", result.error);
+          }
         });
       }
     }

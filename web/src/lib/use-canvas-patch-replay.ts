@@ -24,11 +24,13 @@ import type { PatchEnvelope } from "../../../src/dom/patch-serialize.js";
  * @param transformRef - Ref to the transform layer div containing the live DOM
  * @param updateContent - EditorState callback for full content replacement (fallback)
  * @param refreshLayers - Callback to refresh the layers panel from live DOM after mutations
+ * @param validateSelection - D5: Remove selected IDs that no longer exist in live DOM
  */
 export function useCanvasPatchReplay(
   transformRef: RefObject<HTMLDivElement | null>,
   updateContent: (html: string) => void,
   refreshLayers?: () => void,
+  validateSelection?: () => void,
 ) {
   const handlePatch = useCallback(
     (patch: PatchEnvelope) => {
@@ -40,8 +42,10 @@ export function useCanvasPatchReplay(
 
       // D3: Refresh layers panel from live DOM to reflect changes
       refreshLayers?.();
+      // D5: Clear selection for any elements removed by this patch
+      validateSelection?.();
     },
-    [transformRef, refreshLayers],
+    [transformRef, refreshLayers, validateSelection],
   );
 
   const handleResync = useCallback(
@@ -53,13 +57,14 @@ export function useCanvasPatchReplay(
         if (pageContainer) {
           pageContainer.innerHTML = html;
           refreshLayers?.();
+          validateSelection?.();
           return;
         }
       }
       // Fallback: full React content replacement
       updateContent(html);
     },
-    [transformRef, updateContent, refreshLayers],
+    [transformRef, updateContent, refreshLayers, validateSelection],
   );
 
   return { handlePatch, handleResync };

@@ -57,6 +57,7 @@ function EditorShellInner({
     updateContent,
     updateElementStyle,
     refreshLayersFromDOM,
+    validateSelection,
     setOnStyleEdit,
     activePageId,
     leftPanelVisible,
@@ -75,10 +76,12 @@ function EditorShellInner({
 
   // D2+D3: Patch replay — applies ops directly to canvas DOM via replayPatch(A15),
   // then refreshes layers panel from live DOM
+  // D5: validateSelection clears stale selected IDs after agent patches
   const { handlePatch, handleResync } = useCanvasPatchReplay(
     transformRef,
     updateContent,
     refreshLayersFromDOM,
+    validateSelection,
   );
 
   // D1+D4: Patch-based real-time connection with self-dedup

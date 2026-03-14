@@ -101,6 +101,9 @@ export type EditorState = {
   /** Re-derive layers from the live DOM in transformRef (active page only). */
   refreshLayersFromDOM: () => void;
 
+  /** D5: Remove selected IDs that no longer exist in the live DOM. */
+  validateSelection: () => void;
+
   /** D4: Set a callback invoked after each updateElementStyle call.
    *  Used by useEditBridge to send style edits to the server. */
   setOnStyleEdit: (cb: ((id: string, styles: Record<string, string>) => void) | null) => void;
@@ -375,6 +378,22 @@ export function EditorProvider({
     );
   }, []);
 
+  // D5: Remove selected IDs that no longer exist in the live DOM.
+  // Called after patch replay to handle agent-deleted elements.
+  const validateSelection = useCallback(() => {
+    const root = transformRef.current;
+    if (!root || selectedIds.size === 0) return;
+    const surviving = new Set<string>();
+    for (const id of selectedIds) {
+      if (root.querySelector(`[data-z10-id="${id}"]`)) {
+        surviving.add(id);
+      }
+    }
+    if (surviving.size < selectedIds.size) {
+      setSelectedIds(surviving);
+    }
+  }, [selectedIds]);
+
   const addPage = useCallback(() => {
     const prev = content || initialContent;
     const parser = new DOMParser();
@@ -505,6 +524,7 @@ export function EditorProvider({
         updateElementStyle,
         updateContent,
         refreshLayersFromDOM,
+        validateSelection,
         setOnStyleEdit,
         isExternalUpdate,
         activePageId,

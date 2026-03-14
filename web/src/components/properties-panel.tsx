@@ -57,7 +57,8 @@ export function PropertiesPanel() {
     return () => clearTimeout(timer);
   }, [refreshStyles]);
 
-  // Live-update styles during drag/resize via MutationObserver
+  // D5: Live-update styles during drag/resize and agent patches via MutationObserver.
+  // Watches all attributes (not just style) so agent attr changes are reflected.
   useEffect(() => {
     if (selectedIds.size !== 1) return;
     const id = Array.from(selectedIds)[0];
@@ -67,7 +68,7 @@ export function PropertiesPanel() {
     const observer = new MutationObserver(() => {
       setStyles(getElementStyles(el));
     });
-    observer.observe(el, { attributes: true, attributeFilter: ["style"] });
+    observer.observe(el, { attributes: true, characterData: true, subtree: true });
     return () => observer.disconnect();
   }, [selectedIds, transformRef]);
 
