@@ -108,7 +108,7 @@ No backwards compat: the current `/api/projects/:id/exec` endpoint (statement-by
 
 - [x] **C6. Canonical DOM persistence** — Persist canonical DOM back to DB (`projects.content` column). Options: on interval, on idle, on shutdown, on N commits. Ring buffer persistence for crash recovery. Serialization: `outerHTML` of canonical DOM (includes all metadata). (§F3 from previous)
 
-- [ ] **C7. Delete obsolete server code** — Remove: `/api/projects/:id/exec` (statement streaming), `/api/projects/:id/dom` (checksum-based), `ProjectEventBus` and `project-events.ts` (full-content events), `classifyTool`/`extractAffectedIds` event classification. The MCP write tool handlers that call `executeCommand` are obsolete — see E4.
+- [x] **C7. Delete obsolete server code** — Remove: `/api/projects/:id/exec` (statement streaming), `/api/projects/:id/dom` (checksum-based), `ProjectEventBus` and `project-events.ts` (full-content events), `classifyTool`/`extractAffectedIds` event classification. The MCP write tool handlers that call `executeCommand` are obsolete — see E4. *Note: Deleted exec, dom, events endpoints. Kept project-events.ts temporarily since MCP routes (E4) and use-agent-stream (D6) still import from it.*
 
 ---
 
