@@ -21,24 +21,49 @@ npm run clean   # remove dist/
 
 ## Architecture
 
-Zero-10 is a design tool built on annotated web standards. The `.z10.html` file format uses `data-z10-*` attributes and `<script type="application/z10+json">` metadata over standard HTML/CSS.
+Zero-10 is a design tool built on annotated web standards. The `.z10.html` file format uses `data-z10-*` attributes over standard HTML/CSS. The core engine operates directly on DOM (via happy-dom on server/CLI, browser DOM on web UI).
 
 ### Source Structure
 ```
 src/
-├── core/
-│   ├── types.ts      # All TypeScript types (Z10Document, Z10Node, Z10Command, etc.)
-│   ├── document.ts   # Document model: create, add, remove, move, query nodes
-│   ├── commands.ts   # Command executor: processes the 12 z10 primitives
-│   └── index.ts      # Barrel export
-└── index.ts          # Package entry point
+├── dom/                          # Core collaborative DOM engine
+│   ├── clock.ts                  # Lamport logical clock
+│   ├── timestamps.ts             # data-z10-ts-* attribute system + bubble
+│   ├── bootstrap.ts              # Document bootstrapping (assign IDs + timestamps)
+│   ├── sandbox.ts                # Sandboxed code execution (node:vm)
+│   ├── transaction.ts            # Transaction engine (execute → validate → commit)
+│   ├── validator.ts              # Per-facet conflict detection + TimestampManifest
+│   ├── write-set.ts              # MutationRecord → write set builder
+│   ├── illegal-mod-check.ts      # Reject changes to data-z10-id / data-z10-ts-*
+│   ├── proxy.ts                  # LocalProxy: ticket-based reads + submitCode
+│   ├── reconcile-children.ts     # Efficient child list reconciliation
+│   ├── patch-serialize.ts        # MutationRecords → PatchOp[] serialization
+│   ├── patch-replay.ts           # PatchOp[] → DOM replay (server, CLI, browser)
+│   ├── ring-buffer.ts            # In-memory patch history
+│   ├── style-utils.ts            # Style string parse/diff utilities
+│   ├── strip.ts                  # Strip z10 metadata for agent/export views
+│   └── subtree-lock.ts           # Subtree-level locking
+├── cli/                          # CLI agent interface
+│   ├── exec.ts                   # z10 exec — single-block JS execution
+│   ├── dom.ts                    # z10 dom — DOM tree display
+│   ├── commands.ts               # login, project/page load, components, tokens
+│   ├── project-connection.ts     # Server sync + patch subscription
+│   ├── session.ts                # CLI session state management
+│   ├── api.ts                    # HTTP client for z10 server
+│   └── patch-stream.ts           # SSE patch subscription
+├── core/                         # Legacy (being replaced by src/dom/)
+│   ├── types.ts                  # Z10Document, Z10Node, Z10Command types
+│   ├── document.ts               # Old document model (Map-based)
+│   └── commands.ts               # Old command executor (12 primitives)
+└── index.ts                      # Package entry point
 ```
 
 ### Core Concepts
-- **Z10Document**: In-memory representation of a .z10.html file (nodes, tokens, components, pages)
-- **Z10Node**: A node in the document tree (has id, tag, styles, children, parent)
-- **Z10Command**: One of 12 command types (node, text, instance, repeat, style, move, remove, component, tokens, batch, attr, write_html)
-- **CommandResult**: Success or error with deterministic error codes (NODE_EXISTS, NODE_NOT_FOUND, PARENT_NOT_FOUND, COMPONENT_NOT_FOUND, GOVERNANCE_DENIED)
+- **Transaction Engine**: Atomic code execution — clone subtree → sandbox execute → validate → commit or reject
+- **Sandbox**: Agent code runs in a scoped `document` proxy (node:vm). No access to live DOM, network, or globals
+- **Read Tickets**: `getSubtree()` returns HTML + ticketId with a timestamp manifest. `submitCode(code, ticketId)` validates changes against the manifest for conflict detection
+- **Conflict Detection**: Per-facet timestamp comparison (structural, children, text, attribute, style-property). Concurrent edits to different facets of the same node don't conflict
+- **Patch Broadcast**: Committed changes serialized as PatchOp[] and broadcast to all connected clients
 - **Governance**: Three levels — full-edit, propose-approve, scoped-edit
 
 ### Technology

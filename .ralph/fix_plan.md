@@ -134,7 +134,7 @@ No backwards compat: the editor canvas currently receives full content via `upda
 
 No backwards compat: the current MCP write tools (12 commands mapping to Z10Command) and the `z10_exec` MCP tool (statement-by-statement) get replaced by `submitCode` + `getSubtree`. The agent interface simplifies dramatically.
 
-- [ ] **E1. Update agent system prompt / Skill file** — Minimal additions per §9.3: address nodes by `data-z10-id`, don't touch `data-z10-ts-*`/`data-z10-id`, code runs in sandboxed scoped `document`. Remove references to the old Z10 command model, statement-by-statement execution, checksum-based sync.
+- [x] **E1. Update agent system prompt / Skill file** — Rewrote `z10.skill.md`: removed all references to statement-by-statement execution, checksum sync, STALE_DOM, acorn parsing, Z10Command model. Added: atomic single-block execution, sandboxed scoped `document`, transaction/conflict model, restricted attributes (data-z10-id read-only, data-z10-ts-* do-not-touch), txId output, illegal modification errors. Updated `.ralph/AGENT.md` architecture section to reflect `src/dom/` replacing `src/core/`. 21 tests validate skill file accuracy (`tests/cli/skill-file.test.ts`).
 
 - [ ] **E2. Retry with backoff** — On rejection, CLI returns fresh HTML + new ticket. Exponential backoff with jitter for high-contention: `retryDelay = min(baseDelay * 2^attempt + random(0, jitter), maxDelay)`. CLI can handle automatically, transparent to agent. (§9.4)
 
