@@ -58,6 +58,8 @@ export interface CanonicalDOMOptions {
   onPersist?: (projectId: string, html: string, txId: number) => Promise<void>;
   /** Number of commits before auto-persist. Default: 10. */
   persistEveryNCommits?: number;
+  /** Interval in ms for periodic persistence of all dirty instances. Default: 60s. 0 to disable. */
+  persistIntervalMs?: number;
 }
 
 // ── Singleton Manager ──
@@ -66,11 +68,13 @@ const DEFAULT_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const DEFAULT_CLEANUP_MS = 5 * 60 * 1000; // 5 minutes
 const DEFAULT_RING_CAPACITY = 1000;
 const DEFAULT_PERSIST_EVERY = 10;
+const DEFAULT_PERSIST_INTERVAL_MS = 60 * 1000; // 60 seconds
 
 /** Map of projectId → CanonicalDOM */
 const instances = new Map<string, CanonicalDOM>();
 
 let cleanupTimer: ReturnType<typeof setInterval> | null = null;
+let persistTimer: ReturnType<typeof setInterval> | null = null;
 let managerOptions: CanonicalDOMOptions = {};
 
 /**
@@ -80,10 +84,17 @@ let managerOptions: CanonicalDOMOptions = {};
 export function configureCanonicalDOM(options: CanonicalDOMOptions): void {
   managerOptions = options;
 
-  // Start cleanup timer if not already running
+  // Start cleanup timer (TTL eviction)
   if (cleanupTimer) clearInterval(cleanupTimer);
-  const interval = options.cleanupIntervalMs ?? DEFAULT_CLEANUP_MS;
-  cleanupTimer = setInterval(() => evictStale(), interval);
+  const cleanupInterval = options.cleanupIntervalMs ?? DEFAULT_CLEANUP_MS;
+  cleanupTimer = setInterval(() => evictStale(), cleanupInterval);
+
+  // C6: Start periodic persist timer
+  if (persistTimer) clearInterval(persistTimer);
+  const persistInterval = options.persistIntervalMs ?? DEFAULT_PERSIST_INTERVAL_MS;
+  if (persistInterval > 0 && options.onPersist) {
+    persistTimer = setInterval(() => persistAllDirty(), persistInterval);
+  }
 }
 
 /**
@@ -276,6 +287,22 @@ export function activeInstanceCount(): number {
 
 // ── Internal helpers ──
 
+/**
+ * C6: Persist all dirty instances without evicting them.
+ * Called periodically by the persist timer.
+ */
+export async function persistAllDirty(): Promise<void> {
+  if (!managerOptions.onPersist) return;
+  const promises: Promise<void>[] = [];
+  for (const projectId of instances.keys()) {
+    const canonical = instances.get(projectId);
+    if (canonical?.dirty) {
+      promises.push(persistCanonicalDOM(projectId));
+    }
+  }
+  await Promise.allSettled(promises);
+}
+
 /** Evict stale instances that haven't been accessed within TTL. */
 function evictStale(): void {
   const ttl = managerOptions.ttlMs ?? DEFAULT_TTL_MS;
@@ -322,6 +349,10 @@ export async function shutdownCanonicalDOM(): Promise<void> {
   if (cleanupTimer) {
     clearInterval(cleanupTimer);
     cleanupTimer = null;
+  }
+  if (persistTimer) {
+    clearInterval(persistTimer);
+    persistTimer = null;
   }
 
   // Persist all dirty instances

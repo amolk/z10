@@ -106,7 +106,7 @@ No backwards compat: the current `/api/projects/:id/exec` endpoint (statement-by
 
 - [x] **C5. Reconnection protocol** — SSE/WebSocket reconnection: client sends `lastSeenTxId`. Server replays from ring buffer (A16). If gap exceeds buffer: send full document (same as C4). (§7.4)
 
-- [ ] **C6. Canonical DOM persistence** — Persist canonical DOM back to DB (`projects.content` column). Options: on interval, on idle, on shutdown, on N commits. Ring buffer persistence for crash recovery. Serialization: `outerHTML` of canonical DOM (includes all metadata). (§F3 from previous)
+- [x] **C6. Canonical DOM persistence** — Persist canonical DOM back to DB (`projects.content` column). Options: on interval, on idle, on shutdown, on N commits. Ring buffer persistence for crash recovery. Serialization: `outerHTML` of canonical DOM (includes all metadata). (§F3 from previous)
 
 - [ ] **C7. Delete obsolete server code** — Remove: `/api/projects/:id/exec` (statement streaming), `/api/projects/:id/dom` (checksum-based), `ProjectEventBus` and `project-events.ts` (full-content events), `classifyTool`/`extractAffectedIds` event classification. The MCP write tool handlers that call `executeCommand` are obsolete — see E4.
 
