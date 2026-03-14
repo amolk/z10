@@ -1,14 +1,16 @@
 /**
- * C2. POST /api/projects/:id/transact
+ * C2 + D4. POST /api/projects/:id/transact
  *
  * Server transaction endpoint. Accepts code + manifest, runs the transaction
  * engine against the canonical DOM, returns committed patch or rejection.
  *
- * Request: { code: string, manifest: SerializedManifest, subtreeRootNid: string | null }
+ * Request: { code: string, manifest?: SerializedManifest | null, subtreeRootNid?: string | null }
+ *   - When manifest is provided: validates against client-provided timestamps (CLI/agent path)
+ *   - When manifest is null/omitted: builds fresh manifest from canonical DOM (browser trusted path, D4)
  * Response (committed): { status: 'committed', txId: number, timestamp: number, patch: PatchEnvelope }
  * Response (rejected):  { status: 'rejected', reason: string, conflicts?: Conflict[], freshHtml?: string }
  *
- * §5.2, §5.4
+ * §5.2, §5.4, §10.2
  */
 
 import { NextResponse } from "next/server";
@@ -63,8 +65,8 @@ export async function POST(
   // Validate request body
   let body: {
     code: string;
-    manifest: SerializedManifest;
-    subtreeRootNid: string | null;
+    manifest?: SerializedManifest | null;
+    subtreeRootNid?: string | null;
   };
 
   try {
@@ -79,13 +81,6 @@ export async function POST(
   if (typeof body.code !== "string" || !body.code.trim()) {
     return NextResponse.json(
       { error: "Missing or empty 'code' field" },
-      { status: 400 }
-    );
-  }
-
-  if (!body.manifest || typeof body.manifest.nodes !== "object") {
-    return NextResponse.json(
-      { error: "Missing or invalid 'manifest' field" },
       { status: 400 }
     );
   }
@@ -105,8 +100,21 @@ export async function POST(
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  // Deserialize manifest from JSON
-  const manifest = deserializeManifest(body.manifest);
+  // D4: When manifest is omitted (browser trusted path), build a fresh one
+  // from the canonical DOM. This avoids conflict checking since the manifest
+  // reflects the current server state — human edits are trusted.
+  let manifest;
+  if (body.manifest && typeof body.manifest.nodes === "object") {
+    manifest = deserializeManifest(body.manifest);
+  } else {
+    // Trusted mode: build manifest from canonical DOM subtree
+    const subtreeRoot = body.subtreeRootNid
+      ? canonical.rootElement?.querySelector(
+          `[data-z10-id="${body.subtreeRootNid}"]`
+        ) ?? canonical.rootElement
+      : canonical.rootElement;
+    manifest = subtreeRoot ? buildManifest(subtreeRoot) : deserializeManifest({ nodes: {} });
+  }
 
   // Execute transaction against canonical DOM
   try {

@@ -45,11 +45,13 @@ export type PatchStreamEvent =
  * @param projectId - The project to connect to
  * @param onPatch - Called when a patch envelope is received
  * @param onResync - Called when a full resync is needed (gap too large)
+ * @param isOwnTx - D4: Optional predicate to skip patches originated by this tab
  */
 export function usePatchStream(
   projectId: string,
   onPatch: (patch: PatchEnvelope) => void,
   onResync: (html: string, txId: number) => void,
+  isOwnTx?: (txId: number) => boolean,
 ) {
   const [connectionState, setConnectionState] =
     useState<PatchConnectionState>("disconnected");
@@ -62,6 +64,8 @@ export function usePatchStream(
   onPatchRef.current = onPatch;
   const onResyncRef = useRef(onResync);
   onResyncRef.current = onResync;
+  const isOwnTxRef = useRef(isOwnTx);
+  isOwnTxRef.current = isOwnTx;
 
   useEffect(() => {
     let eventSource: EventSource | null = null;
@@ -98,6 +102,8 @@ export function usePatchStream(
 
             case "patch":
               lastTxIdRef.current = data.patch.txId;
+              // D4: Skip patches originated by this browser tab (already applied optimistically)
+              if (isOwnTxRef.current?.(data.patch.txId)) break;
               onPatchRef.current(data.patch);
               break;
 

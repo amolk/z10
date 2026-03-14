@@ -8,6 +8,8 @@ import { useUndoRedo } from "@/lib/use-undo-redo";
 import { useAgentStream } from "@/lib/use-agent-stream";
 import { usePatchStream } from "@/lib/use-patch-stream";
 import { useCanvasPatchReplay } from "@/lib/use-canvas-patch-replay";
+import { useTransact } from "@/lib/use-transact";
+import { useEditBridge } from "@/lib/use-edit-bridge";
 import { ToolsToolbar } from "@/components/tools-toolbar";
 import { LayersPanel } from "@/components/layers-panel";
 import { EditorCanvas } from "@/components/editor-canvas";
@@ -53,7 +55,10 @@ function EditorShellInner({
   const {
     transformRef,
     updateContent,
+    updateElementStyle,
     refreshLayersFromDOM,
+    setOnStyleEdit,
+    activePageId,
     leftPanelVisible,
     rightPanelVisible,
     setLeftPanelVisible,
@@ -61,6 +66,12 @@ function EditorShellInner({
     isDarkMode,
     toggleDarkMode,
   } = useEditor();
+
+  // D4: Server transaction hook — sends human edits to POST /transact
+  const { transact, isOwnTx } = useTransact(projectId);
+
+  // D4: Edit bridge — wires updateElementStyle to send code to server
+  useEditBridge(updateElementStyle, transact, activePageId, setOnStyleEdit);
 
   // D2+D3: Patch replay — applies ops directly to canvas DOM via replayPatch(A15),
   // then refreshes layers panel from live DOM
@@ -70,11 +81,12 @@ function EditorShellInner({
     refreshLayersFromDOM,
   );
 
-  // D1: Patch-based real-time connection (replaces full-content SSE)
+  // D1+D4: Patch-based real-time connection with self-dedup
   const { connectionState: patchConnectionState } = usePatchStream(
     projectId,
     handlePatch,
     handleResync,
+    isOwnTx,
   );
 
   // Legacy agent stream — kept for activity panel + highlights until D6

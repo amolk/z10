@@ -101,6 +101,10 @@ export type EditorState = {
   /** Re-derive layers from the live DOM in transformRef (active page only). */
   refreshLayersFromDOM: () => void;
 
+  /** D4: Set a callback invoked after each updateElementStyle call.
+   *  Used by useEditBridge to send style edits to the server. */
+  setOnStyleEdit: (cb: ((id: string, styles: Record<string, string>) => void) | null) => void;
+
   // Active page
   activePageId: string | null;
   setActivePageId: (id: string) => void;
@@ -262,6 +266,15 @@ export function EditorProvider({
     });
   }, []);
 
+  // D4: Optional callback for notifying useEditBridge of style edits
+  const onStyleEditRef = useRef<((id: string, styles: Record<string, string>) => void) | null>(null);
+  const setOnStyleEdit = useCallback(
+    (cb: ((id: string, styles: Record<string, string>) => void) | null) => {
+      onStyleEditRef.current = cb;
+    },
+    [],
+  );
+
   const updateElementStyle = useCallback((id: string, styles: Record<string, string>) => {
     const el = transformRef.current?.querySelector(`[data-z10-id="${id}"]`) as HTMLElement | null;
     if (!el) return;
@@ -280,6 +293,8 @@ export function EditorProvider({
       }
       return `<html${doc.documentElement.getAttribute("data-z10-project") ? ` data-z10-project="${doc.documentElement.getAttribute("data-z10-project")}"` : ""}>\n${doc.documentElement.innerHTML}\n</html>`;
     });
+    // D4: Notify edit bridge for server dispatch
+    onStyleEditRef.current?.(id, styles);
   }, []);
 
   const groupIntoFrame = useCallback(() => {
@@ -490,6 +505,7 @@ export function EditorProvider({
         updateElementStyle,
         updateContent,
         refreshLayersFromDOM,
+        setOnStyleEdit,
         isExternalUpdate,
         activePageId,
         setActivePageId,
