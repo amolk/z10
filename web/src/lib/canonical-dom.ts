@@ -22,6 +22,7 @@ import {
   type TimestampManifest,
   type PatchEnvelope,
 } from "../../../src/dom/index.js";
+import { patchBroadcast } from "./patch-broadcast.js";
 
 // ── Types ──
 
@@ -181,6 +182,9 @@ export async function executeTransaction(
     canonical.currentTxId = result.txId;
     canonical.dirty = true;
     canonical.commitsSincePersist++;
+
+    // C3: Broadcast patch to all connected clients
+    patchBroadcast.emit(projectId, result.patch);
 
     // Auto-persist after N commits
     const threshold =
