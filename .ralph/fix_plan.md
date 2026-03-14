@@ -150,7 +150,7 @@ No backwards compat: the current MCP write tools (12 commands mapping to Z10Comm
 
 ## Phase F: Security + Polish
 
-- [ ] **F1. Sandbox hardening** — Agent code runs in isolated context. No access to live document/window/globalThis. CPU time limits (5s lock timeout covers this), memory limits, no network. Freeze `Object.prototype` and other built-ins. (§12.1)
+- [x] **F1. Sandbox hardening** — Hardened `src/dom/sandbox.ts`: blocked all dangerous globals (globalThis, window, process, require, fetch, setTimeout, setInterval, WebSocket, XMLHttpRequest, etc. — all set to `undefined`). Froze built-in prototypes (Object, Array, String, Number, Boolean, Function, RegExp, Date, Error, Map, Set) inside VM context via `runInContext` init script. Whitelisted safe globals (JSON, Math, parseInt, etc.). CPU timeout already enforced (5s default). Added 17 tests in `tests/dom/sandbox.test.ts`. 588 tests passing. (§12.1)
 
 - [ ] **F2. Rate limiting** — Per-CLI-connection: 100 reads/s, 20 writes/s (configurable). Per-WebSocket: similar limits for human editor. (§12.3)
 
