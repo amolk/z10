@@ -1,52 +1,30 @@
 /**
- * z10 exec — Statement-level JavaScript execution
+ * z10 exec — JavaScript execution against the collaborative DOM.
  *
- * Reads JavaScript from stdin, sends to the server for per-statement
- * execution with streaming results. Each statement is executed in order,
- * with const/let rewritten to var so variables persist across statements.
- *
- * Online flow:
+ * New flow (replaces old statement-by-statement approach):
  * 1. Read stdin completely
- * 2. POST script to server
- * 3. Server parses into statements, executes each, streams NDJSON results
- * 4. CLI prints ✓ or ✗ per statement as results stream back
+ * 2. Get project connection (initial sync + patch subscription)
+ * 3. Get subtree + ticket from local proxy
+ * 4. submitCode(code, ticketId) — validates locally, forwards to server
+ * 5. Print result
  *
- * Offline flow:
- * 1. Read stdin, parse into statements
- * 2. Execute each locally in happy-dom with var rewriting
- * 3. Print ✓ or ✗ per statement
+ * Legacy functions (parseStatements, createExecEnvironment, executeStatement,
+ * summarizeStatement) are kept temporarily for MCP tool compatibility (Phase E).
  */
 
 import * as acorn from 'acorn';
 import { Window } from 'happy-dom';
 import { createContext, runInContext, type Context } from 'node:vm';
 import { loadSession, resolvePageId, extractFlag } from './session.js';
-import { computeChecksum } from './checksum.js';
-import { execScriptStream } from './api.js';
+import { getProjectConnection } from './project-connection.js';
 
-export interface ExecOptions {
-  /** Skip server sync (local-only mode) */
-  offline?: boolean;
-  /** Server URL override */
-  serverUrl?: string;
-  /** Project ID override */
-  projectId?: string;
-  /** Initial HTML to seed the DOM */
-  initialHtml?: string;
-  /** Scope document queries to this page root node ID */
-  pageRootId?: string;
-}
-
-export interface StatementResult {
-  statement: string;
-  success: boolean;
-  error?: string;
-  checksum: string;
-}
+// ── Legacy functions kept for MCP tools (until Phase E) ──
 
 /**
  * Parse JavaScript source into individual top-level statements.
  * Uses acorn to find statement boundaries.
+ *
+ * @deprecated Used by MCP tools only. Will be removed in Phase E.
  */
 export function parseStatements(source: string): string[] {
   const statements: string[] = [];
@@ -70,41 +48,13 @@ export function parseStatements(source: string): string[] {
 }
 
 /**
- * Rewrite top-level const/let declarations to var so that variables
- * persist across separate runInContext calls on the same context.
- */
-export function rewriteDeclarations(statement: string): string {
-  try {
-    const ast = acorn.parse(statement, {
-      ecmaVersion: 'latest',
-      sourceType: 'module',
-      allowAwaitOutsideFunction: true,
-    });
-
-    let result = statement;
-    let offset = 0;
-
-    for (const node of (ast as acorn.Program).body) {
-      if (node.type === 'VariableDeclaration' && node.kind !== 'var') {
-        const keywordLen = node.kind.length; // 'const' = 5, 'let' = 3
-        const start = node.start + offset;
-        result = result.slice(0, start) + 'var' + result.slice(start + keywordLen);
-        offset += 3 - keywordLen;
-      }
-    }
-
-    return result;
-  } catch {
-    return statement;
-  }
-}
-
-/**
  * Create a happy-dom execution environment with a z10 global.
  *
  * When `pageRootId` is provided, the `document` exposed to scripts is scoped
  * to the page's root element so queries like `getElementById` only find
  * elements within the current page.
+ *
+ * @deprecated Used by MCP tools only. Will be removed in Phase E.
  */
 export function createExecEnvironment(initialHtml?: string, pageRootId?: string): {
   window: InstanceType<typeof Window>;
@@ -191,6 +141,8 @@ export function createExecEnvironment(initialHtml?: string, pageRootId?: string)
 
 /**
  * Execute a single JS statement in the given context.
+ *
+ * @deprecated Used by MCP tools only. Will be removed in Phase E.
  */
 export function executeStatement(
   statement: string,
@@ -211,6 +163,8 @@ export function executeStatement(
 /**
  * Summarize a statement for stdout display.
  * Truncates long statements to keep output readable.
+ *
+ * @deprecated Used by MCP tools only. Will be removed in Phase E.
  */
 export function summarizeStatement(statement: string): string {
   const oneLine = statement.replace(/\s+/g, ' ').trim();
@@ -218,68 +172,27 @@ export function summarizeStatement(statement: string): string {
   return oneLine.slice(0, 77) + '...';
 }
 
-/**
- * Run exec locally (offline mode).
- *
- * Parses source into statements, executes each with const/let → var
- * rewriting so variables persist across statements.
- */
-export function runExecOffline(source: string, options: ExecOptions = {}): {
-  results: StatementResult[];
-  finalHtml: string;
-  success: boolean;
-} {
-  const statements = parseStatements(source);
-  const results: StatementResult[] = [];
-
-  const { context, getHtml } = createExecEnvironment(options.initialHtml, options.pageRootId);
-
-  for (const stmt of statements) {
-    const rewritten = rewriteDeclarations(stmt);
-    const localExec = executeStatement(rewritten, context);
-    const html = getHtml();
-    const localChecksum = computeChecksum(html);
-
-    if (!localExec.success) {
-      const result: StatementResult = {
-        statement: summarizeStatement(stmt),
-        success: false,
-        error: localExec.error,
-        checksum: localChecksum,
-      };
-      results.push(result);
-      console.log(`✗ ${result.statement}`);
-      console.error(`  ERROR: ${localExec.error}`);
-      return { results, finalHtml: html, success: false };
-    }
-
-    const result: StatementResult = {
-      statement: summarizeStatement(stmt),
-      success: true,
-      checksum: localChecksum,
-    };
-    results.push(result);
-    console.log(`✓ ${result.statement}`);
-  }
-
-  return { results, finalHtml: getHtml(), success: true };
-}
+// ── New exec flow (B8) ──
 
 /**
- * CLI entry point for `z10 exec [--project <id>] [--page <id>] [--offline]`.
- * Reads JavaScript from stdin and executes it.
+ * CLI entry point for `z10 exec [--project <id>] [--page <id>]`.
+ * Reads JavaScript from stdin and executes via the collaborative DOM.
  *
- * Online: sends script to server, reads streaming per-statement results.
- * Offline: executes locally with happy-dom.
+ * New flow: read stdin → get project connection → getSubtree + ticket
+ * → submitCode(code, ticketId) → print result.
  */
 export async function cmdExec(args: string[]): Promise<void> {
   const session = await loadSession();
-  const offline = args.includes('--offline');
 
   // Resolve project/page from flags or session
   const projectIdFromFlag = extractFlag(args, '--project');
   const projectId = projectIdFromFlag ?? session.currentProjectId;
   const pageId = resolvePageId(args, session);
+
+  if (!projectId) {
+    console.error('No project specified. Use --project <id> or run `z10 project load <id>` first.');
+    process.exit(1);
+  }
 
   // Read stdin
   const chunks: Buffer[] = [];
@@ -296,88 +209,28 @@ export async function cmdExec(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  const online = !offline && !!projectId;
+  // Get project connection (initial sync + patch subscription)
+  const conn = await getProjectConnection(projectId);
 
-  if (online) {
-    // Stream to server — server parses, executes per-statement, streams results
-    try {
-      let totalStatements = 0;
-      let allSuccess = true;
-      let finalChecksum = '';
+  // Get a subtree + ticket. Use page root if specified, otherwise document root.
+  const selector = pageId ? `[data-z10-id="${pageId}"]` : '[data-z10-id]';
+  const subtree = conn.proxy.getSubtree(selector);
 
-      for await (const event of execScriptStream(
-        projectId!,
-        source,
-        pageId,
-      )) {
-        if (event.type === 'result') {
-          totalStatements++;
-          if (event.success) {
-            console.log(`✓ ${event.statement}`);
-          } else {
-            console.log(`✗ ${event.statement}`);
-            console.error(`  ERROR: ${event.error}`);
-            allSuccess = false;
-          }
-          finalChecksum = event.checksum;
-        } else if (event.type === 'done') {
-          finalChecksum = event.checksum;
-          allSuccess = event.success ?? false;
-        } else if (event.type === 'error') {
-          console.error(`Server error: ${event.error}`);
-          allSuccess = false;
-        }
+  // Submit code for execution via the collaborative DOM transaction engine
+  const result = await conn.proxy.submitCode(source, subtree.ticketId);
+
+  if (result.status === 'committed') {
+    console.log(`✓ Executed (txId: ${result.txId})`);
+  } else {
+    console.error('✗ Execution rejected');
+    if (result.conflicts && result.conflicts.length > 0) {
+      for (const conflict of result.conflicts) {
+        console.error(`  Conflict: ${JSON.stringify(conflict)}`);
       }
-
-      // Update local cache with server's final state
-      if (allSuccess && finalChecksum) {
-        const { saveDomCache, updateSession } = await import('./session.js');
-        const { fetchDom } = await import('./api.js');
-        try {
-          const dom = await fetchDom(projectId!);
-          await saveDomCache(dom.html);
-          await updateSession({ domChecksum: dom.checksum });
-        } catch {
-          // Cache refresh failed, not critical
-        }
-      }
-
-      console.log(`\n${totalStatements} statement${totalStatements === 1 ? '' : 's'}, ${allSuccess ? 'all passed' : 'failed'}`);
-      if (!allSuccess) process.exit(1);
-      return;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`Server unavailable (${msg}), falling back to offline mode`);
     }
-  }
-
-  // Offline: execute locally
-  let initialHtml: string | undefined;
-  try {
-    const { loadDomCache } = await import('./session.js');
-    const cached = await loadDomCache();
-    if (cached) initialHtml = cached;
-  } catch {
-    // No cached DOM, start fresh
-  }
-
-  const { results, finalHtml, success } = runExecOffline(source, {
-    offline: true,
-    initialHtml,
-    pageRootId: pageId,
-  });
-
-  // Save updated DOM cache
-  if (success) {
-    const { saveDomCache, updateSession } = await import('./session.js');
-    const checksum = computeChecksum(finalHtml);
-    await saveDomCache(finalHtml);
-    await updateSession({ domChecksum: checksum });
-  }
-
-  console.log(`\n${results.length} statement${results.length === 1 ? '' : 's'}, ${success ? 'all passed' : 'failed'}`);
-
-  if (!success) {
+    if (result.freshHtml) {
+      console.error('  Fresh HTML available — subtree was modified concurrently.');
+    }
     process.exit(1);
   }
 }

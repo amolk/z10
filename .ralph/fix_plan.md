@@ -88,7 +88,7 @@ No backwards compat: delete `src/cli/checksum.ts`, gut `src/cli/exec.ts` (remove
 
 - [x] **B7. `--project` and `--page` flags** — Build into the new CLI directly (not retrofitted onto old CLI). Commands `dom`, `exec`, `page list`, `components`, `tokens` accept `--project <id>` and `--page <id>`. Shared `resolveProjectId(args, session)` / `resolvePageId(args, session)` helper. Session-based `load` commands remain as convenience aliases only. Update Skill file & agent docs.
 
-- [ ] **B8. Delete obsolete CLI code** — Remove: `src/cli/checksum.ts` (replaced by tickets), acorn statement parsing from `src/cli/exec.ts` (replaced by single-block execution via A7), `computeChecksum`/`domChecksum` from session, `STALE_DOM` error handling. The new exec flow: read stdin → `submitCode(code, ticketId)` → print result.
+- [x] **B8. Delete obsolete CLI code** — Remove: `src/cli/checksum.ts` (replaced by tickets), acorn statement parsing from `src/cli/exec.ts` (replaced by single-block execution via A7), `computeChecksum`/`domChecksum` from session, `STALE_DOM` error handling. The new exec flow: read stdin → `submitCode(code, ticketId)` → print result. *Deleted checksum.ts. Removed rewriteDeclarations, runExecOffline from exec.ts. Rewrote cmdExec to use getProjectConnection + submitCode. Kept parseStatements/createExecEnvironment/executeStatement/summarizeStatement temporarily for MCP tools (Phase E). Stubbed computeChecksum in mcp/tools.ts. Removed domChecksum from session.ts. Cleaned up dom.ts and commands.ts. 546 tests passing, 0 failures.*
 
 ---
 

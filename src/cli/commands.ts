@@ -64,9 +64,7 @@ export async function cmdProjectLoad(args: string[]): Promise<void> {
   try {
     const result = await fetchDom(projectId);
     await saveDomCache(result.html);
-    await updateSession({ domChecksum: result.checksum });
     console.log(`✓ Project loaded: ${projectId}`);
-    console.log(`  DOM cached (checksum: ${result.checksum})`);
   } catch {
     console.log(`✓ Project set: ${projectId}`);
     console.log('  ⚠ Could not fetch DOM from server (offline mode)');
@@ -142,7 +140,6 @@ export async function cmdPageLoad(args: string[]): Promise<void> {
   try {
     const result = await fetchDom(session.currentProjectId!, { pageId });
     await saveDomCache(result.html);
-    await updateSession({ domChecksum: result.checksum });
     console.log(`✓ Page loaded: ${pageId}`);
   } catch {
     console.log(`✓ Page set: ${pageId}`);

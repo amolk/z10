@@ -1,10 +1,12 @@
 /**
- * Tests for z10 exec — statement parsing, execution, and checksum sync.
+ * Tests for z10 exec — statement parsing, execution environment.
+ *
+ * B8: Removed runExec (replaced by submitCode flow) and checksum tests
+ * (checksum.ts deleted). Legacy functions kept for MCP tool compatibility.
  */
 
 import { describe, it, expect } from 'vitest';
-import { parseStatements, createExecEnvironment, executeStatement, summarizeStatement, runExec } from '../../src/cli/exec.js';
-import { computeChecksum, checksumsMatch } from '../../src/cli/checksum.js';
+import { parseStatements, createExecEnvironment, executeStatement, summarizeStatement } from '../../src/cli/exec.js';
 
 describe('parseStatements', () => {
   it('should parse simple variable declarations', () => {
@@ -169,68 +171,5 @@ describe('summarizeStatement', () => {
 
   it('should collapse whitespace', () => {
     expect(summarizeStatement('const x =\n  1;')).toBe('const x = 1;');
-  });
-});
-
-describe('runExec', () => {
-  it('should execute multiple statements and track results', async () => {
-    const { results, success } = await runExec(
-      'const div = document.createElement("div");\ndiv.id = "test";\ndocument.body.appendChild(div);'
-    );
-    expect(success).toBe(true);
-    expect(results).toHaveLength(3);
-    expect(results.every(r => r.success)).toBe(true);
-  });
-
-  it('should stop on first error', async () => {
-    const { results, success } = await runExec(
-      'const x = 1;\nundefined.foo();\nconst y = 2;'
-    );
-    expect(success).toBe(false);
-    expect(results).toHaveLength(2); // first statement + error
-    expect(results[0]!.success).toBe(true);
-    expect(results[1]!.success).toBe(false);
-  });
-
-  it('should use initial HTML when provided', async () => {
-    const { finalHtml, success } = await runExec(
-      'document.getElementById("box").textContent = "updated";',
-      { initialHtml: '<div id="box">original</div>' }
-    );
-    expect(success).toBe(true);
-    expect(finalHtml).toContain('updated');
-  });
-
-  it('should compute checksums for each statement', async () => {
-    const { results } = await runExec('const div = document.createElement("div");\ndocument.body.appendChild(div);');
-    expect(results[0]!.checksum).toBeDefined();
-    expect(results[1]!.checksum).toBeDefined();
-    // Second statement changes DOM, so checksum should differ
-    expect(results[0]!.checksum).not.toBe(results[1]!.checksum);
-  });
-});
-
-describe('checksum', () => {
-  it('should compute deterministic checksums', () => {
-    const html = '<div>Hello</div>';
-    const c1 = computeChecksum(html);
-    const c2 = computeChecksum(html);
-    expect(c1).toBe(c2);
-  });
-
-  it('should differ for different content', () => {
-    const c1 = computeChecksum('<div>Hello</div>');
-    const c2 = computeChecksum('<div>World</div>');
-    expect(c1).not.toBe(c2);
-  });
-
-  it('should produce 16-char hex strings', () => {
-    const c = computeChecksum('<div>test</div>');
-    expect(c).toMatch(/^[0-9a-f]{16}$/);
-  });
-
-  it('should match identical checksums', () => {
-    expect(checksumsMatch('abc123', 'abc123')).toBe(true);
-    expect(checksumsMatch('abc123', 'def456')).toBe(false);
   });
 });

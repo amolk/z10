@@ -14,7 +14,6 @@ export interface SessionState {
   serverUrl?: string;
   currentProjectId?: string;
   currentPageId?: string;
-  domChecksum?: string;
 }
 
 const Z10_DIR = join(homedir(), '.z10');

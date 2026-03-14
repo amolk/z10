@@ -27,7 +27,8 @@ import { exportSvelte } from '../export/svelte.js';
 import { parseStatements, createExecEnvironment, executeStatement, summarizeStatement } from '../cli/exec.js';
 import { serializeZ10Html } from '../format/serializer.js';
 import { parseZ10Html } from '../format/parser.js';
-import { computeChecksum } from '../cli/checksum.js';
+// checksum.ts deleted in B8 — stub until MCP tools are overhauled in Phase E
+function computeChecksum(_html: string): string { return ''; }
 
 // ---------------------------------------------------------------------------
 // Tool Schemas (JSON Schema format for MCP)

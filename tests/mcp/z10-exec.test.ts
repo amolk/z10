@@ -75,17 +75,14 @@ describe('z10_exec MCP tool', () => {
     expect(result.error).toBeDefined();
   });
 
-  it('should return checksum on success', () => {
+  it('should return checksum field on success (deprecated stub)', () => {
     const r1 = JSON.parse(handleUtilityTool(doc, 'z10_exec', {
       code: 'document.body.innerHTML = "<p>A</p>";',
     }));
-    const r2 = JSON.parse(handleUtilityTool(doc, 'z10_exec', {
-      code: 'document.body.innerHTML = "<p>B</p>";',
-    }));
 
+    // B8: checksum.ts deleted, computeChecksum is a stub returning ''
+    // Checksum field still present for API compatibility until Phase E
     expect(r1.checksum).toBeDefined();
-    expect(r2.checksum).toBeDefined();
-    expect(r1.checksum).not.toBe(r2.checksum);
   });
 
   it('should execute multi-statement code with loops', () => {

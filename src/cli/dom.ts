@@ -8,10 +8,9 @@
  */
 
 import { Window, type HTMLElement as HappyElement } from 'happy-dom';
-import { loadSession, saveDomCache, updateSession, resolvePageId } from './session.js';
+import { loadSession, saveDomCache, resolvePageId } from './session.js';
 import { loadDomCache, extractFlag } from './session.js';
 import { fetchDom } from './api.js';
-import { computeChecksum } from './checksum.js';
 import { resolveProjectId } from './session.js';
 
 /** Tags to skip in tree/full output */
@@ -115,7 +114,6 @@ export async function cmdDom(args: string[]): Promise<void> {
       const raw = await fetchDom(projectId);
 
       await saveDomCache(raw.html);
-      await updateSession({ domChecksum: raw.checksum });
 
       if (full) {
         const display = pageId
