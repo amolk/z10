@@ -8,7 +8,7 @@
  */
 
 import { Window, type HTMLElement as HappyElement } from 'happy-dom';
-import { loadSession, saveDomCache, resolvePageId } from './session.js';
+import { loadSession, saveDomCache, resolvePageId, rejectUnknownFlags } from './session.js';
 import { loadDomCache, extractFlag } from './session.js';
 import { fetchDom } from './api.js';
 import { resolveProjectId } from './session.js';
@@ -99,6 +99,7 @@ export function compactTreeView(html: string, pageId?: string): string {
  * CLI entry point for `z10 dom [--project <id>] [--page <id>] [--full] [--offline]`.
  */
 export async function cmdDom(args: string[]): Promise<void> {
+  rejectUnknownFlags(args, ['--project', '--page', '--full', '--offline']);
   const full = args.includes('--full');
   const offline = args.includes('--offline');
   const session = await loadSession();

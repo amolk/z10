@@ -4,7 +4,7 @@
  * Commands: login, project load, page load, components, tokens
  */
 
-import { loadSession, updateSession, clearSession, requireSession, resolveProjectId, resolvePageId } from './session.js';
+import { loadSession, updateSession, clearSession, requireSession, resolveProjectId, resolvePageId, rejectUnknownFlags } from './session.js';
 import { fetchComponents, fetchTokens, fetchDom, fetchProjects, fetchPages } from './api.js';
 import { saveDomCache } from './session.js';
 
@@ -16,6 +16,7 @@ import { saveDomCache } from './session.js';
  *   z10 login --server <url> --token <api-token>
  */
 export async function cmdLogin(args: string[]): Promise<void> {
+  rejectUnknownFlags(args, ['--token', '--server']);
   const tokenIdx = args.indexOf('--token');
   const serverIdx = args.indexOf('--server');
 
@@ -99,6 +100,7 @@ export async function cmdProjectList(): Promise<void> {
  * z10 page list [--project <id>] — List pages in the current project.
  */
 export async function cmdPageList(args: string[] = []): Promise<void> {
+  rejectUnknownFlags(args, ['--project']);
   const session = await loadSession();
   const projectId = resolveProjectId(args, session);
 
@@ -151,6 +153,7 @@ export async function cmdPageLoad(args: string[]): Promise<void> {
  * z10 components [--project <id>] — List registered Web Components.
  */
 export async function cmdComponents(args: string[]): Promise<void> {
+  rejectUnknownFlags(args, ['--project']);
   const session = await loadSession();
   const projectId = resolveProjectId(args, session);
 
@@ -177,6 +180,7 @@ export async function cmdComponents(args: string[]): Promise<void> {
  * z10 tokens [--project <id>] — List design tokens.
  */
 export async function cmdTokens(args: string[]): Promise<void> {
+  rejectUnknownFlags(args, ['--project']);
   const session = await loadSession();
   const projectId = resolveProjectId(args, session);
 

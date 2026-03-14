@@ -42,52 +42,45 @@ export interface ExecStreamEvent {
   checksum: string;
 }
 
+export interface TransactResult {
+  status: 'committed' | 'rejected';
+  txId?: number;
+  timestamp?: number;
+  reason?: string;
+  conflicts?: unknown[];
+  error?: string;
+  freshHtml?: string;
+  patch?: unknown;
+}
+
 /**
- * Send a script to the server for per-statement streaming execution.
- * Returns an async iterable of NDJSON events.
+ * Send code to the server's /transact endpoint for execution against
+ * the canonical DOM. Returns committed result or rejection details.
  */
-export async function* execScriptStream(
+export async function transact(
   projectId: string,
-  script: string,
-  pageRootId?: string,
-): AsyncGenerator<ExecStreamEvent> {
+  code: string,
+  subtreeRootNid?: string,
+): Promise<TransactResult> {
   const baseUrl = await getBaseUrl();
   const headers = await getAuthHeaders();
 
-  const res = await fetch(`${baseUrl}/api/projects/${projectId}/exec`, {
+  const res = await fetch(`${baseUrl}/api/projects/${projectId}/transact`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ script, pageRootId }),
+    body: JSON.stringify({
+      code,
+      subtreeRootNid: subtreeRootNid ?? null,
+      // Omit manifest → server builds fresh one (trusted mode)
+    }),
   });
 
   if (!res.ok) {
     const text = await res.text();
-    yield { type: 'error', error: `Server error (${res.status}): ${text}`, checksum: '' };
-    return;
+    throw new Error(`Server error (${res.status}): ${text}`);
   }
 
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-
-    const lines = buffer.split('\n');
-    buffer = lines.pop()!;
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      yield JSON.parse(line) as ExecStreamEvent;
-    }
-  }
-
-  // Process any remaining data
-  if (buffer.trim()) {
-    yield JSON.parse(buffer) as ExecStreamEvent;
-  }
+  return await res.json() as TransactResult;
 }
 
 export async function fetchDom(
@@ -97,12 +90,9 @@ export async function fetchDom(
   const baseUrl = await getBaseUrl();
   const headers = await getAuthHeaders();
 
-  const params = new URLSearchParams();
-  if (options?.compact) params.set('compact', 'true');
-  if (options?.pageId) params.set('page', options.pageId);
-  const qs = params.toString() ? `?${params.toString()}` : '';
-
-  const res = await fetch(`${baseUrl}/api/projects/${projectId}/dom${qs}`, {
+  // The /dom endpoint was replaced by /sync (returns { html, txId }).
+  // We hit /sync and map the response to the DomResult shape the CLI expects.
+  const res = await fetch(`${baseUrl}/api/projects/${projectId}/sync`, {
     method: 'GET',
     headers,
   });
@@ -111,7 +101,8 @@ export async function fetchDom(
     throw new Error(`Failed to fetch DOM (${res.status}): ${await res.text()}`);
   }
 
-  return await res.json() as DomResult;
+  const data = await res.json() as { html: string; txId: number };
+  return { html: data.html, checksum: String(data.txId) };
 }
 
 export interface ProjectSummary {

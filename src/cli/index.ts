@@ -355,7 +355,14 @@ MCP Connection:
 `.trim());
 }
 
-main().catch((err: Error) => {
+main().then(() => {
+  // Commands like 'serve' never return (long-running server).
+  // For all other commands, force exit to avoid hanging on open handles
+  // (e.g. Node.js fetch keep-alive connections).
+  if (command !== 'serve') {
+    process.exit(0);
+  }
+}).catch((err: Error) => {
   console.error(err.message);
   process.exit(1);
 });

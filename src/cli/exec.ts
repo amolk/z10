@@ -1,17 +1,15 @@
 /**
- * z10 exec — JavaScript execution against the collaborative DOM.
+ * z10 exec — JavaScript execution against the server's canonical DOM.
  *
- * E3 flow (replaces old statement-by-statement approach):
- * 1. Read stdin completely (single JS block, no parsing)
- * 2. Get project connection (initial sync + patch subscription)
- * 3. Get subtree + ticket from local proxy
- * 4. submitCode(code, ticketId) with retry on conflict (E2)
- * 5. Print result: updated HTML on commit, fresh HTML + conflicts on reject
+ * Flow:
+ * 1. Read stdin completely (single JS block)
+ * 2. POST to /api/projects/:id/transact (server executes against canonical DOM)
+ * 3. Print result: updated HTML on commit, error details on reject
+ * 4. Fetch fresh DOM to display post-commit state
  */
 
-import { loadSession, resolvePageId, extractFlag } from './session.js';
-import { getProjectConnection } from './project-connection.js';
-import type { SubmitResult } from '../dom/proxy.js';
+import { loadSession, resolvePageId, extractFlag, rejectUnknownFlags } from './session.js';
+import { transact, fetchDom } from './api.js';
 
 // ── Retry with backoff (E2) ──
 
@@ -40,62 +38,14 @@ export function computeRetryDelay(attempt: number, opts: RetryOptions): number {
   return Math.min(exponential + jitter, opts.maxDelayMs);
 }
 
-/**
- * Submit code with automatic retry on conflict rejection.
- * On conflict: uses the fresh ticket from the rejection result, waits with
- * exponential backoff + jitter, then retries. Transparent to the agent.
- *
- * Non-conflict rejections (code errors) are NOT retried — the same code
- * would fail again.
- */
-export async function submitWithRetry(
-  proxy: { submitCode: (code: string, ticketId: string) => Promise<SubmitResult> },
-  code: string,
-  ticketId: string,
-  opts: RetryOptions = DEFAULT_RETRY,
-): Promise<SubmitResult> {
-  let currentTicketId = ticketId;
-
-  for (let attempt = 0; attempt < opts.maxAttempts; attempt++) {
-    const result = await proxy.submitCode(code, currentTicketId);
-
-    if (result.status === 'committed') {
-      return result;
-    }
-
-    // Only retry on conflict rejections — code errors won't resolve with retry
-    const isConflict = result.conflicts && result.conflicts.length > 0;
-    if (!isConflict) {
-      return result;
-    }
-
-    // Last attempt — return the rejection, don't wait
-    if (attempt === opts.maxAttempts - 1) {
-      return result;
-    }
-
-    // Use the fresh ticket from the rejection for retry
-    currentTicketId = result.newTicketId;
-
-    // Wait with exponential backoff + jitter
-    const delay = computeRetryDelay(attempt, opts);
-    await new Promise((resolve) => setTimeout(resolve, delay));
-  }
-
-  // Unreachable, but satisfies TypeScript
-  throw new Error('Retry loop exited unexpectedly');
-}
-
-// ── CLI exec command (E3) ──
+// ── CLI exec command ──
 
 /**
  * CLI entry point for `z10 exec [--project <id>] [--page <id>]`.
- * Reads JavaScript from stdin and executes via the collaborative DOM.
- *
- * Flow: read stdin → get project connection → getSubtree + ticket
- * → submitCode with retry on conflict → print result with HTML.
+ * Reads JavaScript from stdin and sends to server for execution.
  */
 export async function cmdExec(args: string[]): Promise<void> {
+  rejectUnknownFlags(args, ['--project', '--page']);
   const session = await loadSession();
 
   // Resolve project/page from flags or session
@@ -123,24 +73,19 @@ export async function cmdExec(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  // Get project connection (initial sync + patch subscription)
-  const conn = await getProjectConnection(projectId);
-
-  // Get a subtree + ticket. Use page root if specified, otherwise document root.
-  const selector = pageId ? `[data-z10-id="${pageId}"]` : '[data-z10-id]';
-  const subtree = conn.proxy.getSubtree(selector);
-
-  // Submit code with automatic retry on conflict (E2)
-  const result = await submitWithRetry(conn.proxy, source, subtree.ticketId);
+  // Send code to server for execution against canonical DOM
+  const subtreeRootNid = pageId ?? undefined;
+  const result = await transact(projectId, source, subtreeRootNid);
 
   if (result.status === 'committed') {
-    // Print success with txId and updated HTML for agent consumption
+    // Fetch fresh DOM to show the updated state
+    const dom = await fetchDom(projectId);
     console.log(`✓ Executed (txId: ${result.txId})`);
-    console.log(result.html);
+    console.log(dom.html);
   } else {
     // Print rejection details
     console.error('✗ Execution rejected');
-    if (result.conflicts && result.conflicts.length > 0) {
+    if (result.conflicts && (result.conflicts as unknown[]).length > 0) {
       for (const conflict of result.conflicts) {
         console.error(`  Conflict: ${JSON.stringify(conflict)}`);
       }
@@ -148,8 +93,9 @@ export async function cmdExec(args: string[]): Promise<void> {
     if (result.error) {
       console.error(`  Error: ${result.error}`);
     }
-    // Print fresh HTML so agent can see current state and retry
-    console.log(result.html);
+    if (result.freshHtml) {
+      console.log(result.freshHtml);
+    }
     process.exit(1);
   }
 }

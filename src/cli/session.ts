@@ -87,6 +87,19 @@ export function extractFlag(args: string[], flag: string): string | undefined {
 }
 
 /**
+ * Check args for unknown flags and exit with error if found.
+ */
+export function rejectUnknownFlags(args: string[], knownFlags: string[]): void {
+  for (const arg of args) {
+    if (arg.startsWith('--') && !knownFlags.includes(arg)) {
+      console.error(`Unknown flag: ${arg}`);
+      console.error(`Valid flags: ${knownFlags.join(', ')}`);
+      process.exit(1);
+    }
+  }
+}
+
+/**
  * Resolve project ID from --project flag or session state.
  * Exits with error if neither is available.
  */
