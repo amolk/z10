@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { Window } from 'happy-dom';
 import {
   validate, preCheckTreeTimestamp, buildManifest,
+  serializeManifest, deserializeManifest,
   type TimestampManifest, type NodeManifestEntry,
 } from '../../src/dom/validator.js';
 import {
@@ -154,5 +155,21 @@ describe('buildManifest', () => {
 
     const n2 = manifest.nodes.get('n2')!;
     expect(n2[TS_NODE]).toBe(2);
+  });
+
+  it('should round-trip through serialize/deserialize', () => {
+    document.body.innerHTML = `<div data-z10-id="n1" data-z10-ts-node="5" data-z10-ts-tree="8" data-z10-ts-a-class="4" data-z10-ts-a-style-font-size="6">hi</div>`;
+    const el = document.querySelector('[data-z10-id="n1"]') as unknown as Element;
+    const manifest = buildManifest(el);
+    const serialized = serializeManifest(manifest);
+    const json = JSON.parse(JSON.stringify(serialized)); // simulate network
+    const deserialized = deserializeManifest(json);
+
+    expect(deserialized.nodes.size).toBe(1);
+    const entry = deserialized.nodes.get('n1')!;
+    expect(entry[TS_NODE]).toBe(5);
+    expect(entry[TS_TREE]).toBe(8);
+    expect(entry.attrs.get(tsAttrName('class'))).toBe(4);
+    expect(entry.styleProps.get(tsStylePropName('font-size'))).toBe(6);
   });
 });

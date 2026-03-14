@@ -98,7 +98,7 @@ No backwards compat: the current `/api/projects/:id/exec` endpoint (statement-by
 
 - [x] **C1. Server canonical DOM** — On project open, load content from DB into a happy-dom instance. This is the canonical DOM. Run `bootstrapDocument` (A4) if the document lacks `data-z10-id`/`data-z10-ts-*` (first-time migration). Server holds one happy-dom instance per active project. (§5.1)
 
-- [ ] **C2. Server transaction endpoint** — New endpoint: `POST /api/projects/:id/transact`. Accepts `{code, manifest, subtreeRootNid}`. Runs transaction engine (A9) against canonical DOM. Returns `{status: 'committed', timestamp, patch}` or `{status: 'rejected', conflicts, freshHtml}`. Replaces current `/api/projects/:id/exec`. (§5.2, §5.4)
+- [x] **C2. Server transaction endpoint** — New endpoint: `POST /api/projects/:id/transact`. Accepts `{code, manifest, subtreeRootNid}`. Runs transaction engine (A9) against canonical DOM. Returns `{status: 'committed', timestamp, patch}` or `{status: 'rejected', conflicts, freshHtml}`. Replaces current `/api/projects/:id/exec`. (§5.2, §5.4)
 
 - [ ] **C3. Patch broadcast** — On each commit, broadcast patch envelope to all connected clients. Server→CLI: SSE (reuse/replace existing `events` endpoint). Server→WebUI: WebSocket. Same patch format for both. Replaces current `ProjectEventBus` that sends full serialized content. (§7.1, §7.2)
 

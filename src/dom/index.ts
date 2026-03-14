@@ -52,7 +52,9 @@ export { PatchRingBuffer } from './patch-buffer.js';
 // A6. Per-facet validator
 export {
   validate, preCheckTreeTimestamp, buildManifest,
+  serializeManifest, deserializeManifest,
   type TimestampManifest, type NodeManifestEntry, type Conflict,
+  type SerializedManifest,
 } from './validator.js';
 
 // A7. Sandbox execution context

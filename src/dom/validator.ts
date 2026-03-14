@@ -196,3 +196,50 @@ export function buildManifest(subtreeRoot: Element): TimestampManifest {
 
   return { nodes };
 }
+
+// ── Manifest serialization (for network transport) ──
+
+/** JSON-safe representation of a manifest (Maps → objects). */
+export interface SerializedManifest {
+  nodes: Record<string, {
+    [TS_NODE]?: number;
+    [TS_CHILDREN]?: number;
+    [TS_TEXT]?: number;
+    [TS_TREE]?: number;
+    attrs: Record<string, number>;
+    styleProps: Record<string, number>;
+  }>;
+}
+
+/** Convert a TimestampManifest to a JSON-safe object. */
+export function serializeManifest(manifest: TimestampManifest): SerializedManifest {
+  const nodes: SerializedManifest['nodes'] = {};
+  for (const [nid, entry] of manifest.nodes) {
+    nodes[nid] = {
+      ...(entry[TS_NODE] !== undefined ? { [TS_NODE]: entry[TS_NODE] } : {}),
+      ...(entry[TS_CHILDREN] !== undefined ? { [TS_CHILDREN]: entry[TS_CHILDREN] } : {}),
+      ...(entry[TS_TEXT] !== undefined ? { [TS_TEXT]: entry[TS_TEXT] } : {}),
+      ...(entry[TS_TREE] !== undefined ? { [TS_TREE]: entry[TS_TREE] } : {}),
+      attrs: Object.fromEntries(entry.attrs),
+      styleProps: Object.fromEntries(entry.styleProps),
+    };
+  }
+  return { nodes };
+}
+
+/** Reconstruct a TimestampManifest from a JSON-deserialized object. */
+export function deserializeManifest(data: SerializedManifest): TimestampManifest {
+  const nodes = new Map<string, NodeManifestEntry>();
+  for (const [nid, raw] of Object.entries(data.nodes)) {
+    const entry: NodeManifestEntry = {
+      attrs: new Map(Object.entries(raw.attrs ?? {})),
+      styleProps: new Map(Object.entries(raw.styleProps ?? {})),
+    };
+    if (raw[TS_NODE] !== undefined) entry[TS_NODE] = raw[TS_NODE];
+    if (raw[TS_CHILDREN] !== undefined) entry[TS_CHILDREN] = raw[TS_CHILDREN];
+    if (raw[TS_TEXT] !== undefined) entry[TS_TEXT] = raw[TS_TEXT];
+    if (raw[TS_TREE] !== undefined) entry[TS_TREE] = raw[TS_TREE];
+    nodes.set(nid, entry);
+  }
+  return { nodes };
+}
