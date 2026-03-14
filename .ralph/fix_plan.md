@@ -84,7 +84,7 @@ No backwards compat: delete `src/cli/checksum.ts`, gut `src/cli/exec.ts` (remove
 
 - [x] **B5. CLI SSE patch consumer** — Connect to server SSE stream. Replay patches against CLI's local DOM via `replayPatch` (A15). Track `lastSeenTxId`. Handle reconnection: send `lastSeenTxId`, receive missed patches or full resync. (§7.4, §8.1)
 
-- [ ] **B6. CLI startup + resync** — On first operation for a project: fetch full document + current `txId` from server (C4), bootstrap into happy-dom (A4 if needed), subscribe to patch stream. On gap too large: full resync discards local DOM, rebuilds from server. (§7.4, §7.5, §14.6)
+- [x] **B6. CLI startup + resync** — On first operation for a project: fetch full document + current `txId` from server (C4), bootstrap into happy-dom (A4 if needed), subscribe to patch stream. On gap too large: full resync discards local DOM, rebuilds from server. (§7.4, §7.5, §14.6)
 
 - [x] **B7. `--project` and `--page` flags** — Build into the new CLI directly (not retrofitted onto old CLI). Commands `dom`, `exec`, `page list`, `components`, `tokens` accept `--project <id>` and `--page <id>`. Shared `resolveProjectId(args, session)` / `resolvePageId(args, session)` helper. Session-based `load` commands remain as convenience aliases only. Update Skill file & agent docs.
 
