@@ -1,5 +1,5 @@
 /**
- * C3. SSE endpoint for real-time patch streaming.
+ * C3 + C5. SSE endpoint for real-time patch streaming with reconnection.
  *
  * Clients connect here to receive PatchEnvelope events as they are committed
  * to the canonical DOM. Used by CLI (B5) for keeping its local replica in sync.
@@ -10,16 +10,21 @@
  * Events:
  *   data: {"type":"connected","projectId":"...","txId":N}
  *   data: {"type":"patch","patch":{txId,timestamp,ops}}
+ *   data: {"type":"resync","html":"...","txId":N}     — gap too large, full resync
  *   data: {"type":"heartbeat"}
+ *
+ * Reconnection protocol (C5, §7.4):
+ *   Client sends ?lastSeenTxId=N. Server replays missed patches from ring buffer.
+ *   If gap exceeds buffer capacity, sends "resync" event with full document.
  *
  * GET /api/projects/[projectId]/patches
  *
- * §7.1, §7.2
+ * §7.1, §7.2, §7.4
  */
 
 import { authenticateMcp } from "@/lib/mcp-auth";
 import { patchBroadcast } from "@/lib/patch-broadcast";
-import { getCurrentTxId } from "@/lib/canonical-dom";
+import { getCurrentTxId, getPatches, getCanonicalHTML } from "@/lib/canonical-dom";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +42,11 @@ export async function GET(
 
   const { projectId } = await params;
 
+  // Parse lastSeenTxId from query params for reconnection (C5)
+  const url = new URL(request.url);
+  const lastSeenParam = url.searchParams.get("lastSeenTxId");
+  const lastSeenTxId = lastSeenParam ? parseInt(lastSeenParam, 10) : null;
+
   const stream = new ReadableStream({
     start(controller) {
       const encoder = new TextEncoder();
@@ -53,12 +63,28 @@ export async function GET(
       const txId = getCurrentTxId(projectId) ?? 0;
       send(JSON.stringify({ type: "connected", projectId, txId }));
 
+      // C5: Replay missed patches on reconnection
+      if (lastSeenTxId !== null && !isNaN(lastSeenTxId) && lastSeenTxId < txId) {
+        const missed = getPatches(projectId, lastSeenTxId);
+        if (missed === null) {
+          // Gap too large — ring buffer doesn't have old enough patches.
+          // Send full resync so client can rebuild its DOM from scratch.
+          const html = getCanonicalHTML(projectId) ?? "";
+          send(JSON.stringify({ type: "resync", html, txId }));
+        } else {
+          // Replay missed patches in order
+          for (const patch of missed) {
+            send(JSON.stringify({ type: "patch", patch }));
+          }
+        }
+      }
+
       // Send heartbeat every 30s to keep connection alive
       const heartbeat = setInterval(() => {
         send(JSON.stringify({ type: "heartbeat" }));
       }, 30_000);
 
-      // Subscribe to patch broadcasts
+      // Subscribe to patch broadcasts for new commits going forward
       const unsubscribe = patchBroadcast.subscribe(projectId, (patch) => {
         send(JSON.stringify({ type: "patch", patch }));
       });

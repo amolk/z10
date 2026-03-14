@@ -104,7 +104,7 @@ No backwards compat: the current `/api/projects/:id/exec` endpoint (statement-by
 
 - [x] **C4. Initial sync endpoint** — `GET /api/projects/:id/sync` → full serialized document (outerHTML with all `data-z10-id` + `data-z10-ts-*`) + current `txId`. New clients bootstrap from this, then subscribe to patch stream. Replaces current `/api/projects/:id/dom` (which returns stripped HTML + checksum). (§7.5)
 
-- [ ] **C5. Reconnection protocol** — SSE/WebSocket reconnection: client sends `lastSeenTxId`. Server replays from ring buffer (A16). If gap exceeds buffer: send full document (same as C4). (§7.4)
+- [x] **C5. Reconnection protocol** — SSE/WebSocket reconnection: client sends `lastSeenTxId`. Server replays from ring buffer (A16). If gap exceeds buffer: send full document (same as C4). (§7.4)
 
 - [ ] **C6. Canonical DOM persistence** — Persist canonical DOM back to DB (`projects.content` column). Options: on interval, on idle, on shutdown, on N commits. Ring buffer persistence for crash recovery. Serialization: `outerHTML` of canonical DOM (includes all metadata). (§F3 from previous)
 
