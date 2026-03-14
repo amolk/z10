@@ -1,8 +1,11 @@
 /**
  * Zero-10 MCP Server
  *
- * Streamable HTTP MCP server that exposes read and write tools
+ * Streamable HTTP MCP server that exposes read, DOM, and utility tools
  * for AI coding agents to interact with .z10.html documents.
+ *
+ * E4: Write tools replaced with DOM tools (submit_code, get_subtree,
+ * refresh_subtree) backed by LocalProxy for atomic transactions.
  *
  * Default endpoint: http://127.0.0.1:29910/mcp
  */
@@ -15,12 +18,13 @@ import type { Z10Document } from '../core/types.js';
 import { createDocument, createDocumentWithPage } from '../core/document.js';
 import { parseZ10Html } from '../format/parser.js';
 import { serializeZ10Html } from '../format/serializer.js';
+import { LocalProxy } from '../dom/proxy.js';
 import {
   READ_TOOLS,
-  WRITE_TOOLS,
+  DOM_TOOLS,
   UTILITY_TOOLS,
   handleReadTool,
-  handleWriteTool,
+  handleDomTool,
   handleUtilityTool,
   type ToolArgs,
   jsonSchemaToZodShape,
@@ -38,6 +42,8 @@ export interface Z10ServerOptions {
 /** The in-memory document state managed by the server */
 let currentDoc: Z10Document = createDocumentWithPage();
 let currentFilePath: string | null = null;
+/** LocalProxy for DOM-based tools (E4) */
+let currentProxy: LocalProxy = new LocalProxy();
 
 /** Get the current document (for testing) */
 export function getDocument(): Z10Document {
@@ -49,6 +55,16 @@ export function setDocument(doc: Z10Document): void {
   currentDoc = doc;
 }
 
+/** Get the current proxy (for testing) */
+export function getProxy(): LocalProxy {
+  return currentProxy;
+}
+
+/** Set the proxy (for testing) */
+export function setProxy(proxy: LocalProxy): void {
+  currentProxy = proxy;
+}
+
 // ---------------------------------------------------------------------------
 // Document Persistence
 // ---------------------------------------------------------------------------
@@ -58,6 +74,11 @@ export async function loadFile(filePath: string): Promise<Z10Document> {
   const html = await readFile(filePath, 'utf-8');
   currentDoc = parseZ10Html(html);
   currentFilePath = filePath;
+
+  // Initialize proxy with the document HTML
+  const docHtml = serializeZ10Html(currentDoc);
+  currentProxy.loadDocument(docHtml);
+
   return currentDoc;
 }
 
@@ -97,20 +118,28 @@ export function createMcpServer(): McpServer {
     );
   }
 
-  // Register write tools
-  for (const tool of WRITE_TOOLS) {
+  // Register DOM tools (E4: replaces old write tools)
+  for (const tool of DOM_TOOLS) {
     const zodShape = jsonSchemaToZodShape(tool.inputSchema);
     server.tool(
       tool.name,
       tool.description,
       zodShape,
       async (args: ToolArgs) => {
-        const result = handleWriteTool(currentDoc, tool.name, args);
+        const result = await handleDomTool(currentProxy, tool.name, args);
 
-        // Auto-save after write operations if a file is loaded
-        if (currentFilePath) {
+        // Auto-save after successful submit_code if a file is loaded
+        if (tool.name === 'submit_code' && currentFilePath) {
           try {
-            await saveFile();
+            // Sync proxy DOM back to Z10Document for read tools
+            const proxyHtml = currentProxy.getFullHtml();
+            const parsed = JSON.parse(result);
+            if (parsed.status === 'committed') {
+              currentDoc = parseZ10Html(
+                `<!DOCTYPE html><html><head></head><body>${proxyHtml}</body></html>`
+              );
+              await saveFile();
+            }
           } catch {
             // Log but don't fail the tool call
           }
@@ -155,6 +184,9 @@ export async function startServer(options: Z10ServerOptions = {}): Promise<void>
       console.log(`Creating new document (file not found: ${options.filePath})`);
       currentDoc = createDocumentWithPage();
       currentFilePath = options.filePath;
+      // Initialize proxy with fresh document
+      const docHtml = serializeZ10Html(currentDoc);
+      currentProxy.loadDocument(docHtml);
     }
   }
 

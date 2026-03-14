@@ -1,15 +1,16 @@
 /**
  * MCP tool definitions and handlers for the Zero-10 MCP server.
- * Implements the read and write tools from PRD Section 2.10.
+ *
+ * E4: Replaced 12 write tools + z10_exec with 3 DOM tools
+ * (submit_code, get_subtree, refresh_subtree) that proxy to LocalProxy.
+ * Read tools and utility tools (export, find_placement, reconcile) remain
+ * and still operate on Z10Document until E5 migrates them.
  */
 
-import { z, type ZodRawShape } from 'zod';
+import { z } from 'zod';
 import type {
   Z10Document,
-  Z10Command,
   Z10Node,
-  NodeId,
-  CommandResult,
   ComponentSchema,
 } from '../core/types.js';
 import {
@@ -18,17 +19,12 @@ import {
   getSubtree,
   getComponent,
   getToken,
-  executeCommand,
   serializeStyle,
 } from '../core/index.js';
 import { exportReact } from '../export/react.js';
 import { exportVue } from '../export/vue.js';
 import { exportSvelte } from '../export/svelte.js';
-import { parseStatements, createExecEnvironment, executeStatement, summarizeStatement } from '../cli/legacy-exec.js';
-import { serializeZ10Html } from '../format/serializer.js';
-import { parseZ10Html } from '../format/parser.js';
-// checksum.ts deleted in B8 — stub until MCP tools are overhauled in Phase E
-function computeChecksum(_html: string): string { return ''; }
+import type { LocalProxy } from '../dom/proxy.js';
 
 // ---------------------------------------------------------------------------
 // Tool Schemas (JSON Schema format for MCP)
@@ -123,175 +119,41 @@ export const READ_TOOLS: ToolDefinition[] = [
   },
 ];
 
-export const WRITE_TOOLS: ToolDefinition[] = [
+/** New DOM tools replacing the 12 write tools + z10_exec. */
+export const DOM_TOOLS: ToolDefinition[] = [
   {
-    name: 'z10_page',
-    description: 'Create a new page with a root node. Required before adding any other nodes to an empty document.',
+    name: 'submit_code',
+    description: 'Execute JavaScript code atomically against the design DOM. Code runs in a sandboxed document with standard DOM APIs (querySelector, createElement, appendChild, etc.). Returns committed result with updated HTML, or rejection with conflict details and fresh HTML for retry.',
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Page name (e.g. "Page 1")' },
-        rootId: { type: 'string', description: 'Root node ID (optional, auto-generated if omitted)' },
-        mode: { type: 'string', enum: ['light', 'dark'], description: 'Display mode (default: project default)' },
+        code: { type: 'string', description: 'JavaScript code to execute. Use standard DOM APIs.' },
+        ticketId: { type: 'string', description: 'Read ticket from a previous get_subtree or submit_code call' },
       },
-      required: ['name'],
+      required: ['code', 'ticketId'],
     },
   },
   {
-    name: 'z10_node',
-    description: 'Create a container element. Errors if ID exists or parent missing.',
+    name: 'get_subtree',
+    description: 'Get a subtree snapshot with a read ticket for conflict detection. Returns stripped HTML (no internal timestamps) and a ticketId to pass to submit_code.',
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'string', description: 'Unique node ID' },
-        tag: { type: 'string', description: 'HTML tag name (e.g. div, header, section)' },
-        parent: { type: 'string', description: 'Parent node ID' },
-        style: { type: 'string', description: 'Inline CSS styles' },
-        intent: { type: 'string', enum: ['layout', 'design', 'decoration', 'content', 'interaction', 'code-region'] },
+        selector: { type: 'string', description: 'CSS selector for subtree root (e.g. "[data-z10-id=\\"nav\\"]")' },
+        depth: { type: 'number', description: 'Max depth limit (optional, defaults to unlimited)' },
       },
-      required: ['id', 'tag', 'parent'],
+      required: ['selector'],
     },
   },
   {
-    name: 'z10_text',
-    description: 'Create a text element',
+    name: 'refresh_subtree',
+    description: 'Check if a subtree has changed since the ticket was issued. Returns changed: false if unchanged, or changed: true with fresh HTML and a new ticket.',
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'string', description: 'Unique node ID' },
-        parent: { type: 'string', description: 'Parent node ID' },
-        content: { type: 'string', description: 'Text content' },
-        style: { type: 'string', description: 'Inline CSS styles' },
+        ticketId: { type: 'string', description: 'Read ticket from a previous get_subtree call' },
       },
-      required: ['id', 'parent', 'content'],
-    },
-  },
-  {
-    name: 'z10_instance',
-    description: 'Instantiate a component. Component must be defined first.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: 'Unique instance ID' },
-        component: { type: 'string', description: 'Component name' },
-        parent: { type: 'string', description: 'Parent node ID' },
-        props: { type: 'object', description: 'Component prop values' },
-      },
-      required: ['id', 'component', 'parent'],
-    },
-  },
-  {
-    name: 'z10_repeat',
-    description: 'Generate repeated elements with faker data',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: 'Base ID for repeated instances' },
-        parent: { type: 'string', description: 'Parent node ID' },
-        count: { type: 'number', description: 'Number of instances to create' },
-        component: { type: 'string', description: 'Component name' },
-        props: { type: 'object', description: 'Props with optional faker directives' },
-      },
-      required: ['id', 'parent', 'count', 'component'],
-    },
-  },
-  {
-    name: 'z10_style',
-    description: 'Update CSS properties on a node. Merge semantics: only specified properties change.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: 'Node ID to style' },
-        props: { type: 'object', description: 'CSS properties to set/update' },
-      },
-      required: ['id', 'props'],
-    },
-  },
-  {
-    name: 'z10_move',
-    description: 'Move or reorder a node in the tree',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: 'Node ID to move' },
-        parent: { type: 'string', description: 'New parent node ID' },
-        index: { type: 'number', description: 'Position index in parent (optional, appends if omitted)' },
-      },
-      required: ['id', 'parent'],
-    },
-  },
-  {
-    name: 'z10_remove',
-    description: 'Remove a node and all its children',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: 'Node ID to remove' },
-      },
-      required: ['id'],
-    },
-  },
-  {
-    name: 'z10_component',
-    description: 'Define or update a component schema',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        name: { type: 'string', description: 'Component name' },
-        props: { type: 'array', description: 'Component prop definitions' },
-        variants: { type: 'array', description: 'Component variants' },
-        styles: { type: 'string', description: 'Component CSS styles' },
-        template: { type: 'string', description: 'Component HTML template' },
-      },
-      required: ['name', 'props', 'variants', 'styles', 'template'],
-    },
-  },
-  {
-    name: 'z10_tokens',
-    description: 'Add or update design tokens',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        collection: { type: 'string', enum: ['primitives', 'semantic'], description: 'Token collection' },
-        vars: { type: 'object', description: 'Token name-value pairs (CSS custom properties)' },
-      },
-      required: ['collection', 'vars'],
-    },
-  },
-  {
-    name: 'z10_batch',
-    description: 'Execute multiple commands atomically. Default: skip failures. strict: halt on error. upsert: create-or-update.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        commands: { type: 'array', description: 'Array of z10 command objects' },
-        mode: { type: 'string', enum: ['strict', 'upsert'], description: 'Batch mode (optional)' },
-      },
-      required: ['commands'],
-    },
-  },
-  {
-    name: 'z10_attr',
-    description: 'Set data attributes or HTML attributes on a node',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: 'Node ID' },
-        attributes: { type: 'object', description: 'Attribute key-value pairs' },
-      },
-      required: ['id', 'attributes'],
-    },
-  },
-  {
-    name: 'write_html',
-    description: 'Raw HTML escape hatch. Stores HTML content on a node.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: 'Target node ID' },
-        html: { type: 'string', description: 'Raw HTML content' },
-      },
-      required: ['id', 'html'],
+      required: ['ticketId'],
     },
   },
 ];
@@ -363,24 +225,13 @@ export const UTILITY_TOOLS: ToolDefinition[] = [
   },
   {
     name: 'reconcile',
-    description: 'Analyze the design document for consistency and report node statistics, orphaned nodes, missing parents, and component usage. Optionally validate against a source directory.',
+    description: 'Analyze the design document for consistency and report node statistics, orphaned nodes, missing parents, and component usage.',
     inputSchema: {
       type: 'object',
       properties: {
-        source: { type: 'string', description: 'Source directory to compare against (optional, for future reconciliation pipeline)' },
+        source: { type: 'string', description: 'Source directory to compare against (optional)' },
       },
       required: [],
-    },
-  },
-  {
-    name: 'z10_exec',
-    description: 'Execute JavaScript code against the design document DOM. Batch mode — accepts full JS source, executes all statements, returns results. Use standard DOM APIs (querySelector, createElement, appendChild, etc.) and the z10 global (z10.setTokens). For non-CLI agents that cannot use stdin piping.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        code: { type: 'string', description: 'JavaScript code to execute against the document DOM. Use standard DOM APIs.' },
-      },
-      required: ['code'],
     },
   },
 ];
@@ -402,6 +253,58 @@ export function handleReadTool(doc: Z10Document, name: string, args: ToolArgs): 
     case 'get_tokens': return handleGetTokens(doc, args['collection'] as string | undefined);
     case 'get_guide': return handleGetGuide(args['topic'] as string | undefined);
     default: return JSON.stringify({ error: `Unknown read tool: ${name}` });
+  }
+}
+
+/** Handle a DOM tool call (submit_code, get_subtree, refresh_subtree) */
+export async function handleDomTool(proxy: LocalProxy, name: string, args: ToolArgs): Promise<string> {
+  switch (name) {
+    case 'submit_code': {
+      const code = args['code'] as string;
+      const ticketId = args['ticketId'] as string;
+      if (!code || !ticketId) {
+        return JSON.stringify({ error: 'Missing required parameters: code and ticketId' });
+      }
+      try {
+        const result = await proxy.submitCode(code, ticketId);
+        return JSON.stringify(result, null, 2);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return JSON.stringify({ error: msg });
+      }
+    }
+
+    case 'get_subtree': {
+      const selector = args['selector'] as string;
+      const depth = args['depth'] as number | undefined;
+      if (!selector) {
+        return JSON.stringify({ error: 'Missing required parameter: selector' });
+      }
+      try {
+        const result = proxy.getSubtree(selector, depth);
+        return JSON.stringify(result, null, 2);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return JSON.stringify({ error: msg });
+      }
+    }
+
+    case 'refresh_subtree': {
+      const ticketId = args['ticketId'] as string;
+      if (!ticketId) {
+        return JSON.stringify({ error: 'Missing required parameter: ticketId' });
+      }
+      try {
+        const result = proxy.refreshSubtree(ticketId);
+        return JSON.stringify(result, null, 2);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return JSON.stringify({ error: msg });
+      }
+    }
+
+    default:
+      return JSON.stringify({ error: `Unknown DOM tool: ${name}` });
   }
 }
 
@@ -436,21 +339,9 @@ export function handleUtilityTool(doc: Z10Document, name: string, args: ToolArgs
       return handleFindPlacement(doc, args);
     case 'reconcile':
       return handleReconcile(doc, args);
-    case 'z10_exec':
-      return handleZ10Exec(doc, args);
     default:
       return JSON.stringify({ error: `Unknown utility tool: ${name}` });
   }
-}
-
-/** Handle a write tool call */
-export function handleWriteTool(doc: Z10Document, name: string, args: ToolArgs): string {
-  const cmd = writeToolToCommand(name, args);
-  if (!cmd) {
-    return JSON.stringify({ error: `Unknown write tool: ${name}` });
-  }
-  const result = executeCommand(doc, cmd);
-  return JSON.stringify(result);
 }
 
 // ---------------------------------------------------------------------------
@@ -580,39 +471,43 @@ function handleGetTokens(doc: Z10Document, collection?: string): string {
 
 function handleGetGuide(topic?: string): string {
   const guides: Record<string, string> = {
-    commands: `Zero-10 has 13 write commands:
-0. z10_page(name, rootId?, mode?) - Create a page (required first for empty documents)
-1. z10_node(id, tag, parent) - Create container
-2. z10_text(id, parent, content) - Create text
-3. z10_instance(id, component, parent) - Instantiate component
-4. z10_repeat(id, parent, count, component) - Repeat with faker
-5. z10_style(id, props) - Update CSS (merge semantics)
-6. z10_move(id, parent, index?) - Move/reorder
-7. z10_remove(id) - Delete node and children
-8. z10_component(name, schema) - Define component
-9. z10_tokens(collection, vars) - Set design tokens
-10. z10_batch(commands, mode?) - Batch execute
-11. z10_attr(id, attributes) - Set HTML attributes
-12. write_html(id, html) - Raw HTML fallback`,
+    commands: `Zero-10 uses 3 DOM tools for design edits:
+1. get_subtree(selector, depth?) - Get subtree HTML + read ticket
+2. submit_code(code, ticketId) - Execute JS atomically against the DOM
+3. refresh_subtree(ticketId) - Check if subtree changed since read
 
-    styles: `z10_style uses MERGE semantics: only specified properties change.
-All visual changes go through z10_style since it's just CSS.
-Examples: layout (display, flex-direction), colors (background, color),
-spacing (padding, margin, gap), typography (font-size, font-weight).`,
+Workflow: get_subtree → write JS code → submit_code → use newTicketId for next edit.
+Code runs in a sandboxed document with standard DOM APIs.`,
 
-    tokens: `Design tokens are CSS custom properties in two collections:
-- primitives: Raw values (--blue-500: #3b82f6)
-- semantic: References to primitives (--primary: var(--blue-500))
-Use z10_tokens to add/update. Reference in styles with var(--name).`,
+    styles: `Use standard DOM style APIs in submit_code:
+element.style.display = 'flex';
+element.style.padding = '8px';
+element.style.setProperty('--custom-var', 'value');
 
-    components: `Components have: name, props, variants, styles, template.
-Define with z10_component, instantiate with z10_instance.
-Use z10_repeat for multiple instances with faker data.`,
+All style changes are atomic — either all commit or none do.`,
 
-    batch: `z10_batch executes multiple commands:
-- Default mode: skip failures, continue
-- strict: halt on first error
-- upsert: create-or-update (recommended for re-running designs)`,
+    tokens: `Design tokens are set via the z10 global in submit_code:
+z10.setTokens('primitives', { '--blue-500': '#3b82f6' });
+z10.setTokens('semantic', { '--primary': 'var(--blue-500)' });
+
+Reference in styles: element.style.color = 'var(--primary)';`,
+
+    components: `Define components using standard Web Components:
+class MyBtn extends HTMLElement { ... }
+customElements.define('my-btn', MyBtn);
+
+Instantiate: document.createElement('my-btn');
+Use static z10Props for design tool property panel.`,
+
+    dom: `Standard DOM APIs available in submit_code:
+- document.querySelector/querySelectorAll/getElementById
+- document.createElement/createTextNode
+- element.appendChild/insertBefore/removeChild/remove
+- element.setAttribute/getAttribute
+- element.textContent/innerHTML
+- element.style.* / element.classList.*
+
+Do NOT modify data-z10-id or data-z10-ts-* attributes.`,
   };
 
   if (topic && guides[topic]) {
@@ -620,121 +515,6 @@ Use z10_repeat for multiple instances with faker data.`,
   }
 
   return `Available topics: ${Object.keys(guides).join(', ')}\n\n${guides['commands']}`;
-}
-
-// ---------------------------------------------------------------------------
-// Write Tool → Command Conversion
-// ---------------------------------------------------------------------------
-
-function writeToolToCommand(name: string, args: ToolArgs): Z10Command | null {
-  switch (name) {
-    case 'z10_page':
-      return {
-        type: 'page',
-        name: args['name'] as string,
-        rootId: args['rootId'] as string | undefined,
-        mode: args['mode'] as 'light' | 'dark' | undefined,
-      };
-
-    case 'z10_node':
-      return {
-        type: 'node',
-        id: args['id'] as string,
-        tag: args['tag'] as string,
-        parent: args['parent'] as string,
-        style: args['style'] as string | undefined,
-        intent: args['intent'] as Z10Command extends { intent?: infer I } ? I : never,
-      } as Z10Command;
-
-    case 'z10_text':
-      return {
-        type: 'text',
-        id: args['id'] as string,
-        parent: args['parent'] as string,
-        content: args['content'] as string,
-        style: args['style'] as string | undefined,
-      };
-
-    case 'z10_instance':
-      return {
-        type: 'instance',
-        id: args['id'] as string,
-        component: args['component'] as string,
-        parent: args['parent'] as string,
-        props: args['props'] as Record<string, string | number | boolean> | undefined,
-      };
-
-    case 'z10_repeat':
-      return {
-        type: 'repeat',
-        id: args['id'] as string,
-        parent: args['parent'] as string,
-        count: args['count'] as number,
-        component: args['component'] as string,
-        props: args['props'] as Record<string, unknown> | undefined,
-      } as Z10Command;
-
-    case 'z10_style':
-      return {
-        type: 'style',
-        id: args['id'] as string,
-        props: args['props'] as Record<string, string>,
-      };
-
-    case 'z10_move':
-      return {
-        type: 'move',
-        id: args['id'] as string,
-        parent: args['parent'] as string,
-        index: args['index'] as number | undefined,
-      };
-
-    case 'z10_remove':
-      return { type: 'remove', id: args['id'] as string };
-
-    case 'z10_component':
-      return {
-        type: 'component',
-        name: args['name'] as string,
-        schema: {
-          props: (args['props'] ?? []) as ComponentSchema['props'],
-          variants: (args['variants'] ?? []) as ComponentSchema['variants'],
-          styles: (args['styles'] ?? '') as string,
-          template: (args['template'] ?? '') as string,
-        },
-      };
-
-    case 'z10_tokens':
-      return {
-        type: 'tokens',
-        collection: args['collection'] as 'primitives' | 'semantic',
-        vars: args['vars'] as Record<string, string>,
-      };
-
-    case 'z10_batch':
-      return {
-        type: 'batch',
-        commands: (args['commands'] ?? []) as Z10Command[],
-        mode: args['mode'] as 'strict' | 'upsert' | undefined,
-      };
-
-    case 'z10_attr':
-      return {
-        type: 'attr',
-        id: args['id'] as string,
-        attributes: args['attributes'] as Record<string, string>,
-      };
-
-    case 'write_html':
-      return {
-        type: 'write_html',
-        id: args['id'] as string,
-        html: args['html'] as string,
-      };
-
-    default:
-      return null;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -797,24 +577,12 @@ function truncate(str: string, maxLen: number): string {
 // find_placement Implementation
 // ---------------------------------------------------------------------------
 
-/**
- * Analyze existing layout and suggest optimal placement for a new element.
- *
- * PRD Section 2.10: find_placement(size?) — Suggest canvas position
- *
- * Strategy:
- * 1. Find the target parent (explicit or page root)
- * 2. Count existing children to determine insertion index
- * 3. Analyze parent's layout mode (flex, grid, block) to suggest position
- * 4. If "near" is specified, suggest placement adjacent to that node
- */
 function handleFindPlacement(doc: Z10Document, args: ToolArgs): string {
   const parentId = args['parent'] as string | undefined;
   const nearId = args['near'] as string | undefined;
   const positionHint = (args['position'] as string) ?? 'auto';
   const size = args['size'] as { width?: number; height?: number } | undefined;
 
-  // Find parent node
   let parent: Z10Node | undefined;
   if (parentId) {
     parent = getNode(doc, parentId);
@@ -831,11 +599,9 @@ function handleFindPlacement(doc: Z10Document, args: ToolArgs): string {
 
   const children = getChildren(doc, parent.id);
 
-  // Detect parent layout mode from styles
   const layoutMode = detectLayoutMode(parent);
 
-  // Determine insertion index
-  let insertIndex = children.length; // default: append
+  let insertIndex = children.length;
   let nearNode: Z10Node | undefined;
 
   if (nearId) {
@@ -853,7 +619,6 @@ function handleFindPlacement(doc: Z10Document, args: ToolArgs): string {
   }
 
   if (positionHint === 'inside' && nearNode) {
-    // Place inside the near node instead
     return JSON.stringify({
       parent: nearId,
       insertIndex: getChildren(doc, nearId!).length,
@@ -901,17 +666,14 @@ function suggestStyle(layout: string, size?: { width?: number; height?: number }
   if (size?.width) style['width'] = `${size.width}px`;
   if (size?.height) style['height'] = `${size.height}px`;
 
-  // Suggest styles that work well with the parent's layout
   switch (layout) {
     case 'flex-row':
-      // In a flex row, suggest flex shrink/grow
       style['flex-shrink'] = '0';
       break;
     case 'flex-column':
       style['width'] = style['width'] ?? '100%';
       break;
     case 'grid':
-      // Grid children usually don't need explicit sizing
       break;
     case 'block':
     default:
@@ -926,37 +688,19 @@ function suggestStyle(layout: string, size?: { width?: number; height?: number }
 // reconcile Implementation
 // ---------------------------------------------------------------------------
 
-/**
- * Analyze design document consistency and report issues.
- *
- * PRD Section 2.10: reconcile(source?) — Trigger sync
- * PRD Section 3.3: Reconciliation Pipeline (Steps 1-8)
- *
- * Current implementation performs document-level analysis:
- * - Node tree integrity (orphaned nodes, missing parents)
- * - Component usage validation
- * - Token coverage analysis
- * - Intent classification summary
- *
- * Full code-to-design reconciliation (PRD Section 3.3) requires
- * JSX/TSX parsing and is deferred to the visual editor.
- */
 function handleReconcile(doc: Z10Document, args: ToolArgs): string {
   const sourceDir = args['source'] as string | undefined;
 
-  // Node integrity analysis
   const orphanedNodes: string[] = [];
   const missingParents: Array<{ id: string; parent: string }> = [];
   const intentCounts: Record<string, number> = {};
   const editorCounts: Record<string, number> = {};
 
   for (const node of doc.nodes.values()) {
-    // Check for orphaned nodes (have parent but parent doesn't exist)
     if (node.parent && !doc.nodes.has(node.parent)) {
       missingParents.push({ id: node.id, parent: node.parent });
     }
 
-    // Check for nodes not reachable from any page root
     if (!node.parent) {
       const isPageRoot = doc.pages.some(p => p.rootNodeId === node.id);
       if (!isPageRoot) {
@@ -964,16 +708,13 @@ function handleReconcile(doc: Z10Document, args: ToolArgs): string {
       }
     }
 
-    // Tally intents
     const intent = node.intent ?? 'unspecified';
     intentCounts[intent] = (intentCounts[intent] ?? 0) + 1;
 
-    // Tally editors
     const editor = node.editor ?? 'unspecified';
     editorCounts[editor] = (editorCounts[editor] ?? 0) + 1;
   }
 
-  // Component usage analysis
   const componentUsage: Record<string, number> = {};
   const unknownComponents: Array<{ id: string; component: string }> = [];
 
@@ -986,7 +727,6 @@ function handleReconcile(doc: Z10Document, args: ToolArgs): string {
     }
   }
 
-  // Unused components (defined but never instantiated)
   const unusedComponents: string[] = [];
   for (const name of doc.components.keys()) {
     if (!componentUsage[name]) {
@@ -994,14 +734,13 @@ function handleReconcile(doc: Z10Document, args: ToolArgs): string {
     }
   }
 
-  // Token coverage
   const tokenRefs = new Set<string>();
   for (const node of doc.nodes.values()) {
     for (const value of Object.values(node.styles)) {
       const matches = value.match(/var\(--[^)]+\)/g);
       if (matches) {
         for (const m of matches) {
-          tokenRefs.add(m.slice(4, -1)); // extract --token-name
+          tokenRefs.add(m.slice(4, -1));
         }
       }
     }
@@ -1049,95 +788,10 @@ function handleReconcile(doc: Z10Document, args: ToolArgs): string {
     ...(sourceDir ? {
       reconciliation: {
         sourceDir,
-        note: 'Full code-to-design reconciliation (PRD Section 3.3) requires the visual editor. This analysis covers document-level consistency only.',
+        note: 'Full code-to-design reconciliation requires the visual editor. This analysis covers document-level consistency only.',
       },
     } : {}),
   };
 
   return JSON.stringify(result, null, 2);
-}
-
-// ---------------------------------------------------------------------------
-// z10_exec — JavaScript execution via MCP (batch mode)
-// ---------------------------------------------------------------------------
-
-/**
- * Execute JavaScript code against the document DOM.
- * This is the MCP fallback for agents that can't use the CLI.
- * Operates in batch mode: all statements execute, results returned at once.
- */
-function handleZ10Exec(doc: Z10Document, args: ToolArgs): string {
-  const code = args['code'] as string;
-  if (!code || typeof code !== 'string') {
-    return JSON.stringify({ error: 'Missing required parameter: code' });
-  }
-
-  // Parse the code into statements
-  let statements: string[];
-  try {
-    statements = parseStatements(code);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return JSON.stringify({ error: msg, statements: 0 });
-  }
-
-  if (statements.length === 0) {
-    return JSON.stringify({ error: 'No statements to execute', statements: 0 });
-  }
-
-  // Serialize current doc to HTML for the exec environment
-  const currentHtml = serializeZ10Html(doc);
-  const { context, getHtml } = createExecEnvironment(currentHtml);
-
-  const results: Array<{
-    statement: string;
-    success: boolean;
-    error?: string;
-  }> = [];
-
-  for (const stmt of statements) {
-    const execResult = executeStatement(stmt, context);
-    const summary = summarizeStatement(stmt);
-
-    if (!execResult.success) {
-      results.push({
-        statement: summary,
-        success: false,
-        error: execResult.error,
-      });
-      // Stop on first error (fail-fast)
-      const finalChecksum = computeChecksum(getHtml());
-      return JSON.stringify({
-        success: false,
-        results,
-        statementsExecuted: results.length,
-        statementsTotal: statements.length,
-        checksum: finalChecksum,
-      }, null, 2);
-    }
-
-    results.push({ statement: summary, success: true });
-  }
-
-  // Apply the final DOM state back to the document
-  const finalHtml = getHtml();
-  const finalChecksum = computeChecksum(finalHtml);
-
-  // Re-parse the modified HTML back into the document
-  try {
-    const updatedDoc = parseZ10Html(`<!DOCTYPE html><html><head></head><body>${finalHtml}</body></html>`);
-    // Merge updated nodes into the current document
-    doc.nodes = updatedDoc.nodes;
-  } catch {
-    // If re-parse fails, report success but note the sync issue
-  }
-
-  return JSON.stringify({
-    success: true,
-    results,
-    statementsExecuted: results.length,
-    statementsTotal: statements.length,
-    checksum: finalChecksum,
-    html: finalHtml,
-  }, null, 2);
 }

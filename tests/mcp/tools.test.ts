@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   createDocument,
   createNode,
@@ -9,13 +9,14 @@ import {
 } from '../../src/core/index.js';
 import {
   handleReadTool,
-  handleWriteTool,
+  handleDomTool,
   handleUtilityTool,
   READ_TOOLS,
-  WRITE_TOOLS,
+  DOM_TOOLS,
   UTILITY_TOOLS,
 } from '../../src/mcp/tools.js';
-import type { Z10Document, ComponentSchema } from '../../src/core/types.js';
+import type { Z10Document } from '../../src/core/types.js';
+import { LocalProxy } from '../../src/dom/proxy.js';
 
 describe('MCP Tools', () => {
   let doc: Z10Document;
@@ -50,12 +51,16 @@ describe('MCP Tools', () => {
       expect(READ_TOOLS.length).toBe(7);
     });
 
-    it('has 13 write tools', () => {
-      expect(WRITE_TOOLS.length).toBe(13);
+    it('has 3 DOM tools', () => {
+      expect(DOM_TOOLS.length).toBe(3);
+      const names = DOM_TOOLS.map(t => t.name);
+      expect(names).toContain('submit_code');
+      expect(names).toContain('get_subtree');
+      expect(names).toContain('refresh_subtree');
     });
 
     it('all tools have name, description, and inputSchema', () => {
-      for (const tool of [...READ_TOOLS, ...WRITE_TOOLS]) {
+      for (const tool of [...READ_TOOLS, ...DOM_TOOLS, ...UTILITY_TOOLS]) {
         expect(tool.name).toBeTruthy();
         expect(tool.description).toBeTruthy();
         expect(tool.inputSchema).toBeTruthy();
@@ -136,116 +141,93 @@ describe('MCP Tools', () => {
 
     it('get_guide returns help text', () => {
       const result = handleReadTool(doc, 'get_guide', {});
-      expect(result).toContain('13 write commands');
+      expect(result).toContain('3 DOM tools');
     });
 
     it('get_guide with specific topic', () => {
       const result = handleReadTool(doc, 'get_guide', { topic: 'styles' });
-      expect(result).toContain('MERGE semantics');
+      expect(result).toContain('style');
     });
   });
 
-  describe('Write Tools', () => {
-    it('z10_node creates a node', () => {
-      const result = JSON.parse(handleWriteTool(doc, 'z10_node', {
-        id: 'sidebar', tag: 'aside', parent: 'page_root', style: 'width: 250px',
+  describe('DOM Tools', () => {
+    let proxy: LocalProxy;
+
+    beforeEach(() => {
+      proxy = new LocalProxy();
+      proxy.loadDocument('<section data-z10-id="main"><p data-z10-id="p1">Hello</p></section>');
+    });
+
+    afterEach(() => {
+      proxy.dispose();
+    });
+
+    it('get_subtree returns HTML and ticketId', async () => {
+      const result = JSON.parse(await handleDomTool(proxy, 'get_subtree', {
+        selector: '[data-z10-id="main"]',
       }));
-      expect(result.ok).toBe(true);
-      expect(doc.nodes.has('sidebar')).toBe(true);
+      expect(result.html).toContain('data-z10-id="main"');
+      expect(result.ticketId).toBeTruthy();
     });
 
-    it('z10_text creates text', () => {
-      const result = JSON.parse(handleWriteTool(doc, 'z10_text', {
-        id: 'label', parent: 'header', content: 'Welcome',
+    it('get_subtree errors on missing selector', async () => {
+      const result = JSON.parse(await handleDomTool(proxy, 'get_subtree', {}));
+      expect(result.error).toContain('selector');
+    });
+
+    it('get_subtree errors on non-existent selector', async () => {
+      const result = JSON.parse(await handleDomTool(proxy, 'get_subtree', {
+        selector: '[data-z10-id="nonexistent"]',
       }));
-      expect(result.ok).toBe(true);
-      expect(doc.nodes.get('label')?.textContent).toBe('Welcome');
+      expect(result.error).toContain('not found');
     });
 
-    it('z10_instance creates component instance', () => {
-      const result = JSON.parse(handleWriteTool(doc, 'z10_instance', {
-        id: 'save_btn', component: 'Button', parent: 'header',
-        props: { variant: 'primary' },
+    it('submit_code commits a valid mutation', async () => {
+      // First get a ticket
+      const subtree = JSON.parse(await handleDomTool(proxy, 'get_subtree', {
+        selector: '[data-z10-id="main"]',
       }));
-      expect(result.ok).toBe(true);
-      expect(doc.nodes.get('save_btn')?.componentName).toBe('Button');
-    });
 
-    it('z10_style updates styles', () => {
-      const result = JSON.parse(handleWriteTool(doc, 'z10_style', {
-        id: 'header', props: { 'background': '#fff', 'padding': '24px' },
+      const result = JSON.parse(await handleDomTool(proxy, 'submit_code', {
+        code: 'document.querySelector("[data-z10-id=\\"p1\\"]").textContent = "Updated";',
+        ticketId: subtree.ticketId,
       }));
-      expect(result.ok).toBe(true);
-      expect(doc.nodes.get('header')?.styles['background']).toBe('#fff');
-      expect(doc.nodes.get('header')?.styles['padding']).toBe('24px');
-      expect(doc.nodes.get('header')?.styles['display']).toBe('flex'); // preserved
+      expect(result.status).toBe('committed');
+      expect(result.txId).toBeGreaterThan(0);
+      expect(result.html).toContain('Updated');
+      expect(result.newTicketId).toBeTruthy();
     });
 
-    it('z10_move moves a node', () => {
-      handleWriteTool(doc, 'z10_node', { id: 'footer', tag: 'footer', parent: 'page_root' });
-      const result = JSON.parse(handleWriteTool(doc, 'z10_move', {
-        id: 'title', parent: 'footer',
+    it('submit_code errors on missing params', async () => {
+      const result = JSON.parse(await handleDomTool(proxy, 'submit_code', { code: 'x' }));
+      expect(result.error).toContain('Missing');
+    });
+
+    it('submit_code errors on invalid ticket', async () => {
+      const result = JSON.parse(await handleDomTool(proxy, 'submit_code', {
+        code: 'x', ticketId: 'invalid-ticket',
       }));
-      expect(result.ok).toBe(true);
-      expect(doc.nodes.get('title')?.parent).toBe('footer');
+      expect(result.error).toContain('Invalid');
     });
 
-    it('z10_remove deletes a node', () => {
-      const result = JSON.parse(handleWriteTool(doc, 'z10_remove', { id: 'title' }));
-      expect(result.ok).toBe(true);
-      expect(doc.nodes.has('title')).toBe(false);
-    });
-
-    it('z10_component registers a component', () => {
-      const result = JSON.parse(handleWriteTool(doc, 'z10_component', {
-        name: 'Card',
-        props: [{ name: 'title', type: 'string' }],
-        variants: [],
-        styles: '.card { border-radius: 8px; }',
-        template: '<div class="card"><slot /></div>',
+    it('refresh_subtree reports unchanged', async () => {
+      const subtree = JSON.parse(await handleDomTool(proxy, 'get_subtree', {
+        selector: '[data-z10-id="main"]',
       }));
-      expect(result.ok).toBe(true);
-      expect(doc.components.has('Card')).toBe(true);
-    });
 
-    it('z10_tokens sets tokens', () => {
-      const result = JSON.parse(handleWriteTool(doc, 'z10_tokens', {
-        collection: 'primitives',
-        vars: { '--red-500': '#ef4444' },
+      const result = JSON.parse(await handleDomTool(proxy, 'refresh_subtree', {
+        ticketId: subtree.ticketId,
       }));
-      expect(result.ok).toBe(true);
-      expect(doc.tokens.primitives.has('--red-500')).toBe(true);
+      expect(result.changed).toBe(false);
     });
 
-    it('z10_attr sets attributes', () => {
-      const result = JSON.parse(handleWriteTool(doc, 'z10_attr', {
-        id: 'header', attributes: { 'aria-label': 'Main header' },
-      }));
-      expect(result.ok).toBe(true);
-      expect(doc.nodes.get('header')?.attributes['aria-label']).toBe('Main header');
+    it('refresh_subtree errors on missing ticketId', async () => {
+      const result = JSON.parse(await handleDomTool(proxy, 'refresh_subtree', {}));
+      expect(result.error).toContain('ticketId');
     });
 
-    it('z10_batch executes multiple commands', () => {
-      const result = JSON.parse(handleWriteTool(doc, 'z10_batch', {
-        commands: [
-          { type: 'node', id: 'nav', tag: 'nav', parent: 'page_root' },
-          { type: 'text', id: 'link', parent: 'nav', content: 'Home' },
-        ],
-      }));
-      expect(result.ok).toBe(true);
-      expect(doc.nodes.has('nav')).toBe(true);
-      expect(doc.nodes.has('link')).toBe(true);
-    });
-
-    it('write_html stores HTML', () => {
-      const result = JSON.parse(handleWriteTool(doc, 'write_html', {
-        id: 'header', html: '<p>Custom</p>',
-      }));
-      expect(result.ok).toBe(true);
-    });
-
-    it('returns error for unknown tool', () => {
-      const result = JSON.parse(handleWriteTool(doc, 'unknown_tool', {}));
+    it('returns error for unknown DOM tool', async () => {
+      const result = JSON.parse(await handleDomTool(proxy, 'unknown_tool', {}));
       expect(result.error).toContain('Unknown');
     });
   });
