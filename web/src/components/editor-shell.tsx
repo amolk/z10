@@ -7,6 +7,7 @@ import { useAutoSave } from "@/lib/use-auto-save";
 import { useUndoRedo } from "@/lib/use-undo-redo";
 import { useAgentStream } from "@/lib/use-agent-stream";
 import { usePatchStream } from "@/lib/use-patch-stream";
+import { useCanvasPatchReplay } from "@/lib/use-canvas-patch-replay";
 import { ToolsToolbar } from "@/components/tools-toolbar";
 import { LayersPanel } from "@/components/layers-panel";
 import { EditorCanvas } from "@/components/editor-canvas";
@@ -15,9 +16,7 @@ import { ConnectAgentButton } from "@/components/connect-agent-button";
 import { useAgentHighlight } from "@/lib/use-agent-highlight";
 import { AgentActivityPanel } from "@/components/agent-activity-panel";
 import { useEditor } from "@/lib/editor-state";
-import { useCallback } from "react";
 import { PanelLeft, PanelRight, Sun, Moon } from "lucide-react";
-import type { PatchEnvelope } from "@/lib/use-patch-stream";
 
 export function EditorShell({
   projectId,
@@ -51,16 +50,24 @@ function EditorShellInner({
   useKeyboardShortcuts();
   useUndoRedo();
   const { saveState } = useAutoSave(projectId, initialContent);
+  const {
+    transformRef,
+    updateContent,
+    leftPanelVisible,
+    rightPanelVisible,
+    setLeftPanelVisible,
+    setRightPanelVisible,
+    isDarkMode,
+    toggleDarkMode,
+  } = useEditor();
+
+  // D2: Patch replay — applies ops directly to canvas DOM via replayPatch(A15)
+  const { handlePatch, handleResync } = useCanvasPatchReplay(
+    transformRef,
+    updateContent,
+  );
 
   // D1: Patch-based real-time connection (replaces full-content SSE)
-  // Patch replay into canvas DOM happens in D2; for now, connection + tracking only
-  const handlePatch = useCallback((patch: PatchEnvelope) => {
-    // D2 will wire replayPatch(patch.ops, canvasRoot) here
-    void patch;
-  }, []);
-  const handleResync = useCallback((_html: string, _txId: number) => {
-    // D2/D3 will wire full DOM replacement here
-  }, []);
   const { connectionState: patchConnectionState } = usePatchStream(
     projectId,
     handlePatch,
@@ -71,14 +78,6 @@ function EditorShellInner({
   const { connectionState, lastOperation, operations, clearOperations } =
     useAgentStream(projectId);
   useAgentHighlight(lastOperation);
-  const {
-    leftPanelVisible,
-    rightPanelVisible,
-    setLeftPanelVisible,
-    setRightPanelVisible,
-    isDarkMode,
-    toggleDarkMode,
-  } = useEditor();
 
   return (
     <div className="flex h-screen flex-col">
