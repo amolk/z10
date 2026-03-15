@@ -130,7 +130,10 @@ export function bumpTimestamps(
   const nodesToBubble = new Set<Element>();
 
   for (const entry of writeSet) {
-    const el = root.querySelector(`[data-z10-id="${entry.nid}"]`);
+    // Check root element itself, not just descendants (querySelector misses the root)
+    const el = root.getAttribute('data-z10-id') === entry.nid
+      ? root
+      : root.querySelector(`[data-z10-id="${entry.nid}"]`);
     if (!el) continue;
 
     switch (entry.facet) {

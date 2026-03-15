@@ -36,6 +36,7 @@ export function replayPatch(ops: PatchOp[], rootElement: Element): void {
 }
 
 function findNode(rootElement: Element, id: string): Element | null {
+  if (rootElement.getAttribute('data-z10-id') === id) return rootElement;
   return rootElement.querySelector(`[data-z10-id="${id}"]`);
 }
 
@@ -87,16 +88,17 @@ function replayAdd(
   // Idempotency: remove any pre-existing elements with the same data-z10-id
   // to prevent doubling when the same patch is replayed or when a move
   // generates separate remove+add records that arrive out of order.
-  const children = fragment.children || fragment.childNodes;
-  for (let i = 0; i < children.length; i++) {
-    const child = children[i] as Element;
-    if (child.nodeType === 1) {
-      const childId = child.getAttribute?.('data-z10-id');
-      if (childId) {
-        const existing = findNode(rootElement, childId);
-        if (existing) {
-          existing.parentElement?.removeChild(existing);
-        }
+  // Must check ALL elements in the fragment (including nested), not just
+  // top-level children, because nested elements may exist elsewhere in the tree.
+  const idedElements = fragment.querySelectorAll
+    ? fragment.querySelectorAll('[data-z10-id]')
+    : [];
+  for (let i = 0; i < idedElements.length; i++) {
+    const childId = (idedElements[i] as Element).getAttribute('data-z10-id');
+    if (childId) {
+      const existing = findNode(rootElement, childId);
+      if (existing) {
+        existing.parentElement?.removeChild(existing);
       }
     }
   }

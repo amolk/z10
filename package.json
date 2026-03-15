@@ -22,6 +22,10 @@
       "types": "./dist/cli/dom.d.ts",
       "default": "./dist/cli/dom.js"
     },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "default": "./dist/core/index.js"
+    },
     "./dom": {
       "types": "./dist/dom/index.d.ts",
       "default": "./dist/dom/index.js"

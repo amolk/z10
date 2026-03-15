@@ -127,6 +127,72 @@ describe('replayPatch', () => {
       { op: 'text', id: 'missing', value: 'x' },
     ], root);
   });
+
+  // ── Idempotency / anti-doubling tests ──
+
+  it('add op is idempotent — replaying same add does not double the element', () => {
+    document.body.innerHTML = '<div data-z10-id="parent"><span data-z10-id="c1">first</span></div>';
+    const root = document.body as unknown as Element;
+
+    const addOp: PatchOp = {
+      op: 'add',
+      parentId: 'parent',
+      html: '<span data-z10-id="c1">updated</span>',
+      before: null,
+    };
+
+    // Replay the same add twice
+    replayPatch([addOp], root);
+    replayPatch([addOp], root);
+
+    const matches = root.querySelectorAll('[data-z10-id="c1"]');
+    expect(matches.length).toBe(1);
+    expect(matches[0].textContent).toBe('updated');
+  });
+
+  it('add op deduplicates nested elements that exist elsewhere in the tree', () => {
+    // n3 exists under "other", but the add op nests it under "parent" > "n5"
+    document.body.innerHTML = `
+      <div data-z10-id="root">
+        <div data-z10-id="parent"></div>
+        <div data-z10-id="other"><span data-z10-id="n3">old</span></div>
+      </div>
+    `;
+    const root = document.body.querySelector('[data-z10-id="root"]') as Element;
+
+    replayPatch([{
+      op: 'add',
+      parentId: 'parent',
+      html: '<div data-z10-id="n5"><span data-z10-id="n3">moved</span></div>',
+      before: null,
+    }], root);
+
+    // n3 should exist only once (under n5, not also under other)
+    const matches = root.querySelectorAll('[data-z10-id="n3"]');
+    expect(matches.length).toBe(1);
+    expect(matches[0].textContent).toBe('moved');
+    expect(matches[0].parentElement!.getAttribute('data-z10-id')).toBe('n5');
+  });
+
+  it('add op removes existing top-level element before inserting', () => {
+    document.body.innerHTML = `
+      <div data-z10-id="parent">
+        <span data-z10-id="c1">old</span>
+      </div>
+    `;
+    const root = document.body as unknown as Element;
+
+    replayPatch([{
+      op: 'add',
+      parentId: 'parent',
+      html: '<span data-z10-id="c1">new</span>',
+      before: null,
+    }], root);
+
+    const matches = root.querySelectorAll('[data-z10-id="c1"]');
+    expect(matches.length).toBe(1);
+    expect(matches[0].textContent).toBe('new');
+  });
 });
 
 // ── A16. Patch Ring Buffer ──

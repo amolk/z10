@@ -21,6 +21,20 @@ export {
 export type { ExpandedInstance, InstantiationResult } from './template.js';
 
 export {
+  generateClassBody,
+} from './web-components.js';
+
+export {
+  resolveEffectiveAttributes,
+} from './template.js';
+
+export {
+  propagateToInstances,
+  isComponentInstance,
+  isComponentDefinition,
+} from '../core/propagation.js';
+
+export {
   setPageMode,
   togglePageMode,
   setAllPagesMode,

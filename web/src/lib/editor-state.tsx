@@ -10,6 +10,8 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { inferNodeType } from "@/lib/node-inference";
+import { tagNameToComponentName } from "z10/core";
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -60,7 +62,7 @@ export type ElementStyles = {
   paddingLeft: string;
 };
 
-export type ToolType = "select" | "frame" | "text" | "hand";
+export type ToolType = "select" | "frame" | "text" | "hand" | "component";
 
 export type EditorState = {
   // Selection
@@ -104,6 +106,9 @@ export type EditorState = {
   /** D5: Remove selected IDs that no longer exist in the live DOM. */
   validateSelection: () => void;
 
+  /** Ref flag: set true to suppress undo snapshot recording (e.g. during patch replay). */
+  undoSuppressRef: RefObject<boolean>;
+
   /** D4: Set a callback invoked after each updateElementStyle call.
    *  Used by useEditBridge to send style edits to the server. */
   setOnStyleEdit: (cb: ((id: string, styles: Record<string, string>) => void) | null) => void;
@@ -122,8 +127,20 @@ export type EditorState = {
   isDarkMode: boolean;
   toggleDarkMode: () => void;
 
+  // Inline text editing
+  editingTextId: string | null;
+  startTextEdit: (id: string) => void;
+  commitTextEdit: () => void;
+
   // Group selected elements into a frame
   groupIntoFrame: () => void;
+
+  // Component editing
+  editingComponentName: string | null;
+  enterComponentEditMode: (name: string) => void;
+  exitComponentEditMode: () => void;
+  createComponentFromSelection: () => void;
+  componentList: string[];
 
   // Page operations
   addPage: () => void;
@@ -169,6 +186,42 @@ export function EditorProvider({
   const [leftPanelVisible, setLeftPanelVisibleRaw] = useState(false);
   const [rightPanelVisible, setRightPanelVisibleRaw] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [editingTextId, setEditingTextId] = useState<string | null>(null);
+
+  const [editingComponentName, setEditingComponentName] = useState<string | null>(null);
+  const [componentList, setComponentList] = useState<string[]>([]);
+
+  const enterComponentEditMode = useCallback((name: string) => {
+    setEditingComponentName(name);
+  }, []);
+
+  const exitComponentEditMode = useCallback(() => {
+    setEditingComponentName(null);
+  }, []);
+
+  const createComponentFromSelection = useCallback(() => {
+    console.warn('createComponentFromSelection is not yet implemented. Use `z10 component create` via CLI.');
+  }, []);
+
+  // Parse component list from content — match only component-meta script blocks
+  useEffect(() => {
+    if (!content) return;
+    const re = /<script\s+(?=[^>]*data-z10-role="component-meta")(?=[^>]*data-z10-component="([^"]*)")[^>]*>/g;
+    const names = new Set<string>();
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(content)) !== null) {
+      names.add(m[1]!);
+    }
+    setComponentList(Array.from(names));
+  }, [content]);
+
+  const startTextEdit = useCallback((id: string) => {
+    setEditingTextId(id);
+  }, []);
+
+  const commitTextEdit = useCallback(() => {
+    setEditingTextId(null);
+  }, []);
 
   // Hydrate panel visibility from localStorage on mount
   useEffect(() => {
@@ -215,6 +268,7 @@ export function EditorProvider({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const transformRef = useRef<HTMLDivElement>(null);
+  const undoSuppressRef = useRef(false);
 
   const select = useCallback((id: string, multi = false) => {
     setSelectedIds((prev) => {
@@ -329,9 +383,8 @@ export function EditorProvider({
       const frameId = `frame_${Date.now()}`;
       const frame = doc.createElement("div");
       frame.setAttribute("data-z10-id", frameId);
-      frame.setAttribute("data-z10-node", "Frame");
       const padding = 16;
-      frame.setAttribute("style", `position: absolute; left: ${Math.round(minX - padding)}px; top: ${Math.round(minY - padding)}px; width: ${Math.round(maxX - minX + padding * 2)}px; height: ${Math.round(maxY - minY + padding * 2)}px; border-radius: 8px;`);
+      frame.setAttribute("style", `position: absolute; left: ${Math.round(minX - padding)}px; top: ${Math.round(minY - padding)}px; width: ${Math.round(maxX - minX + padding * 2)}px; height: ${Math.round(maxY - minY + padding * 2)}px; display: flex; border-radius: 8px;`);
 
       // Insert frame before first element, move all into it
       const parent = elements[0].parentElement;
@@ -415,10 +468,9 @@ export function EditorProvider({
     const frameId = `frame_${pageId}`;
     const frameEl = doc.createElement("div");
     frameEl.setAttribute("data-z10-id", frameId);
-    frameEl.setAttribute("data-z10-node", "Frame");
     frameEl.setAttribute(
       "style",
-      "position: absolute; left: 0px; top: 0px; width: 1440px; height: 900px; background-color: #ffffff; overflow: hidden;"
+      "display: flex; position: absolute; left: 0px; top: 0px; width: 1440px; height: 900px; background-color: #ffffff; overflow: hidden;"
     );
     pageEl.appendChild(frameEl);
 
@@ -525,6 +577,7 @@ export function EditorProvider({
         updateContent,
         refreshLayersFromDOM,
         validateSelection,
+        undoSuppressRef,
         setOnStyleEdit,
         isExternalUpdate,
         activePageId,
@@ -535,7 +588,15 @@ export function EditorProvider({
         setRightPanelVisible,
         isDarkMode,
         toggleDarkMode,
+        editingTextId,
+        startTextEdit,
+        commitTextEdit,
         groupIntoFrame,
+        editingComponentName,
+        enterComponentEditMode,
+        exitComponentEditMode,
+        createComponentFromSelection,
+        componentList,
         addPage,
         deletePage,
         duplicatePage,
@@ -729,36 +790,32 @@ function elementToNode(el: HTMLElement, depth: number): LayerNode {
 
   const pageName = el.getAttribute("data-z10-page");
   const componentName = el.getAttribute("data-z10-component");
-  const nodeName = el.getAttribute("data-z10-node");
+  const isCustomEl = el.tagName.includes("-") && el.tagName.startsWith("Z10-");
+  const componentDef = el.getAttribute("data-z10-component-def");
 
   const z10Id = el.getAttribute("data-z10-id");
-  let name = pageName || componentName || nodeName || formatNodeName(z10Id, el);
+  let name = pageName || componentName || formatNodeName(z10Id, el);
   let type: LayerNode["type"] = "element";
 
   if (pageName) {
     type = "page";
+  } else if (componentDef) {
+    type = "component";
+    name = componentDef;
+  } else if (isCustomEl) {
+    type = "component";
+    name = tagNameToComponentName(el.tagName.toLowerCase()) ?? el.tagName.toLowerCase();
   } else if (componentName) {
     type = "component";
     name = componentName;
-  } else if (el.children.length > 0) {
-    type = "frame";
-  } else if (
-    el.tagName === "P" ||
-    el.tagName === "SPAN" ||
-    el.tagName === "H1" ||
-    el.tagName === "H2" ||
-    el.tagName === "H3" ||
-    el.tagName === "H4" ||
-    el.tagName === "H5" ||
-    el.tagName === "H6" ||
-    el.tagName === "A" ||
-    el.tagName === "LABEL"
-  ) {
-    type = "text";
-    // Use text content as name if short enough
-    const textContent = el.textContent?.trim();
-    if (textContent && textContent.length < 40) {
-      name = `"${textContent}"`;
+  } else {
+    type = inferNodeType(el);
+    if (type === "text") {
+      // Use text content as name if short enough
+      const textContent = el.textContent?.trim();
+      if (textContent && textContent.length < 40) {
+        name = `"${textContent}"`;
+      }
     }
   }
 

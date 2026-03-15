@@ -38,9 +38,11 @@ import { getConfigValue, setConfigValue, CONFIG_KEYS } from '../core/config.js';
 import { exportReact } from '../export/react.js';
 import { exportVue } from '../export/vue.js';
 import { exportSvelte } from '../export/svelte.js';
+import { exportWebComponents } from '../export/web-components.js';
 import { cmdLogin, cmdLogout, cmdProjectLoad, cmdProjectList, cmdPageLoad, cmdPageList, cmdComponents, cmdTokens as cmdTokensList } from './commands.js';
 import { cmdExec } from './exec.js';
 import { cmdDom } from './dom.js';
+import { cmdComponent } from './component.js';
 import type { ProjectConfig } from '../core/types.js';
 
 const args = process.argv.slice(2);
@@ -110,6 +112,9 @@ async function main(): Promise<void> {
       break;
     case 'exec':
       await cmdExec(args.slice(1));
+      break;
+    case 'component':
+      await cmdComponent(args.slice(1));
       break;
     case 'components':
       await cmdComponents(args.slice(1));
@@ -262,7 +267,7 @@ async function cmdConfig(): Promise<void> {
 async function cmdExport(): Promise<void> {
   const filePath = args[1];
   if (!filePath) {
-    console.error('Usage: z10 export <file.z10.html> [--format react|vue] [--id <nodeId>] [--out <output>] [--js]');
+    console.error('Usage: z10 export <file.z10.html> [--format react|vue|svelte|web-components] [--id <nodeId>] [--out <output>] [--js]');
     process.exit(1);
   }
 
@@ -283,8 +288,15 @@ async function cmdExport(): Promise<void> {
     result = exportSvelte(doc, { id, typescript: !useJs, includeTokens: true });
   } else if (format === 'react') {
     result = exportReact(doc, { id, typescript: !useJs, includeTokens: true });
+  } else if (format === 'web-components') {
+    const schemas = Array.from(doc.components.values());
+    result = exportWebComponents(schemas, {
+      name: id,
+      includeTokens: true,
+      tokens: { primitives: doc.tokens.primitives, semantic: doc.tokens.semantic },
+    });
   } else {
-    console.error(`Unknown format: ${format}. Supported: react, vue, svelte`);
+    console.error(`Unknown format: ${format}. Supported: react, vue, svelte, web-components`);
     process.exit(1);
   }
 
@@ -332,7 +344,8 @@ Agent Scripting:
   z10 page load <id>         Set current page context
   z10 dom [--full] [flags]   Show current page DOM tree
   z10 exec [flags]           Execute JavaScript from stdin
-  z10 components [--project] List registered Web Components
+  z10 component <sub> [args] Component CRUD (list|show|create|edit|delete)
+  z10 components [--project] List registered Web Components (shorthand)
   z10 tokens [--project]     List design tokens
 
 Inline Flags (override session state):

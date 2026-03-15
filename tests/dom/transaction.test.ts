@@ -151,4 +151,125 @@ describe('TransactionEngine', () => {
     // No changes should still result in committed (empty patch)
     expect(result.status).toBe('committed');
   });
+
+  // ── appendChild / element creation regression tests ──
+
+  it('commits appendChild — new element appears in live DOM', async () => {
+    const { root, engine } = setup('<div><span>existing</span></div>');
+    const rootNid = root.getAttribute('data-z10-id')!;
+    const manifest = buildManifest(root);
+
+    const result = await engine.execute(
+      `
+      const parent = document.querySelector('[data-z10-id="${rootNid}"]') || document.body;
+      const el = document.createElement('div');
+      el.textContent = 'Hello Z10';
+      parent.appendChild(el);
+      `,
+      rootNid,
+      manifest,
+    );
+
+    expect(result.status).toBe('committed');
+    // The new element must exist in the live DOM
+    expect(root.children.length).toBe(2);
+    expect(root.children[1].textContent).toBe('Hello Z10');
+  });
+
+  it('commits appendChild with styles — element has correct attributes', async () => {
+    const { root, engine } = setup('<div><span>A</span></div>');
+    const rootNid = root.getAttribute('data-z10-id')!;
+    const manifest = buildManifest(root);
+
+    const result = await engine.execute(
+      `
+      const parent = document.querySelector('[data-z10-id="${rootNid}"]') || document.body;
+      const txt = document.createElement('div');
+      txt.textContent = 'Hello Z10';
+      txt.style.fontSize = '48px';
+      txt.style.fontWeight = 'bold';
+      txt.style.color = 'white';
+      parent.appendChild(txt);
+      `,
+      rootNid,
+      manifest,
+    );
+
+    expect(result.status).toBe('committed');
+    expect(root.children.length).toBe(2);
+    const newEl = root.children[1];
+    expect(newEl.textContent).toBe('Hello Z10');
+    // Should have a data-z10-id assigned
+    expect(newEl.getAttribute('data-z10-id')).toBeTruthy();
+  });
+
+  it('commits appendChild — patch contains add op', async () => {
+    const { root, engine } = setup('<div><span>A</span></div>');
+    const rootNid = root.getAttribute('data-z10-id')!;
+    const manifest = buildManifest(root);
+
+    const result = await engine.execute(
+      `
+      const parent = document.querySelector('[data-z10-id="${rootNid}"]') || document.body;
+      const el = document.createElement('p');
+      el.textContent = 'new paragraph';
+      parent.appendChild(el);
+      `,
+      rootNid,
+      manifest,
+    );
+
+    expect(result.status).toBe('committed');
+    if (result.status === 'committed') {
+      expect(result.patch.ops.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('getElementById finds the subtree root element itself', async () => {
+    // Regression: getElementById must find the sandbox root, not just descendants
+    const { root, engine } = setup('<div><span>child</span></div>');
+    const rootNid = root.getAttribute('data-z10-id')!;
+    const manifest = buildManifest(root);
+
+    const result = await engine.execute(
+      `
+      const el = document.getElementById('${rootNid}');
+      if (!el) throw new Error('getElementById returned null for root element');
+      const child = document.createElement('div');
+      child.textContent = 'found root';
+      el.appendChild(child);
+      `,
+      rootNid,
+      manifest,
+    );
+
+    expect(result.status).toBe('committed');
+    expect(root.children.length).toBe(2);
+    expect(root.children[1].textContent).toBe('found root');
+  });
+
+  it('getElementById finds a descendant by data-z10-id', async () => {
+    const { root, engine } = setup('<div><div><span>deep</span></div></div>');
+    const rootNid = root.getAttribute('data-z10-id')!;
+    // Find the nested div's assigned nid
+    const nestedDiv = root.children[0] as Element;
+    const nestedNid = nestedDiv.getAttribute('data-z10-id')!;
+    const manifest = buildManifest(root);
+
+    const result = await engine.execute(
+      `
+      const target = document.getElementById('${nestedNid}');
+      if (!target) throw new Error('getElementById returned null for descendant');
+      const child = document.createElement('p');
+      child.textContent = 'appended to nested';
+      target.appendChild(child);
+      `,
+      rootNid,
+      manifest,
+    );
+
+    expect(result.status).toBe('committed');
+    expect(nestedDiv.children.length).toBe(2);
+    expect(nestedDiv.children[1].textContent).toBe('appended to nested');
+  });
 });

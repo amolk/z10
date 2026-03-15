@@ -34,16 +34,37 @@ export interface SandboxResult {
 export function createSandboxContext(clonedRoot: Element): object {
   const ownerDoc = clonedRoot.ownerDocument;
 
+  // Helper: querySelector that also checks the root element itself
+  // (native querySelector only searches descendants, not the root)
+  const qsInclusive = (selector: string): Element | null => {
+    try {
+      if (clonedRoot.matches?.(selector)) return clonedRoot;
+    } catch { /* invalid selector — let querySelector handle it */ }
+    return clonedRoot.querySelector(selector);
+  };
+
   // Scoped document proxy — only exposes safe DOM methods bound to the clone
   const scopedDocument = {
-    querySelector: (selector: string) => clonedRoot.querySelector(selector),
-    querySelectorAll: (selector: string) => clonedRoot.querySelectorAll(selector),
+    querySelector: (selector: string) => qsInclusive(selector),
+    querySelectorAll: (selector: string) => {
+      const descendants = clonedRoot.querySelectorAll(selector);
+      try {
+        if (clonedRoot.matches?.(selector)) {
+          const arr = [clonedRoot];
+          for (let i = 0; i < descendants.length; i++) arr.push(descendants[i] as Element);
+          return arr;
+        }
+      } catch { /* invalid selector */ }
+      return descendants;
+    },
     getElementById: (id: string) =>
-      clonedRoot.querySelector(`#${cssEscape(id)}`) ??
-      clonedRoot.querySelector(`[data-z10-id="${cssEscape(id)}"]`),
+      qsInclusive(`#${cssEscape(id)}`) ??
+      qsInclusive(`[data-z10-id="${cssEscape(id)}"]`),
     createElement: (tag: string) => ownerDoc.createElement(tag),
     createTextNode: (text: string) => ownerDoc.createTextNode(text),
     createDocumentFragment: () => ownerDoc.createDocumentFragment(),
+    // Expose customElements registry for Web Component support
+    customElements: ownerDoc.defaultView?.customElements,
     // Expose the root for direct access
     documentElement: clonedRoot,
     body: clonedRoot,
@@ -69,6 +90,8 @@ export function createSandboxContext(clonedRoot: Element): object {
     // node:vm contexts get their own copies of these built-ins automatically.
     // Passing the host's constructors would cause freezeBuiltins() to freeze
     // the host process's prototypes, breaking Next.js and other libraries.
+    // HTMLElement base class for custom element definitions (only from happy-dom, never host global)
+    HTMLElement: ownerDoc.defaultView?.HTMLElement,
     JSON: Object.freeze({ parse: JSON.parse, stringify: JSON.stringify }),
     Math,
     parseInt,
@@ -185,6 +208,34 @@ function freezeBuiltins(context: object): void {
     });
   } catch {
     // If freezing fails, context is still usable but less hardened
+  }
+}
+
+/**
+ * Pre-register component custom elements in the sandbox.
+ * Extracts <script type="module" data-z10-component="..."> from head HTML
+ * and evaluates them in the sandbox context.
+ */
+export function registerComponentsInSandbox(
+  context: object,
+  headHtml: string,
+): void {
+  // Match script tags with both type="module" and data-z10-component in any attribute order
+  const scriptRe = /<script\s+(?=[^>]*type="module")(?=[^>]*data-z10-component="[^"]*")[^>]*>([\s\S]*?)<\/script>/g;
+  let match: RegExpExecArray | null;
+  while ((match = scriptRe.exec(headHtml)) !== null) {
+    const code = match[1]!;
+    try {
+      runInContext(code, context, {
+        timeout: 2000,
+        filename: 'component-registration.js',
+      });
+    } catch (err) {
+      // Log warning but don't block other components from registering
+      const nameMatch = match[0]?.match(/data-z10-component="([^"]*)"/);
+      const compName = nameMatch?.[1] ?? 'unknown';
+      console.warn(`[z10] Failed to register component "${compName}":`, err instanceof Error ? err.message : err);
+    }
   }
 }
 

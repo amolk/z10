@@ -14,9 +14,11 @@
 import type { PatchEnvelope } from "@/lib/z10-dom";
 
 export type PatchListener = (patch: PatchEnvelope) => void;
+export type ResyncListener = (html: string, txId: number) => void;
 
 class PatchBroadcast {
   private listeners = new Map<string, Set<PatchListener>>();
+  private resyncListeners = new Map<string, Set<ResyncListener>>();
 
   /**
    * Subscribe to patch events for a specific project.
@@ -38,6 +40,25 @@ class PatchBroadcast {
   }
 
   /**
+   * Subscribe to resync events (full content reload) for a project.
+   * Returns an unsubscribe function.
+   */
+  subscribeResync(projectId: string, listener: ResyncListener): () => void {
+    if (!this.resyncListeners.has(projectId)) {
+      this.resyncListeners.set(projectId, new Set());
+    }
+    this.resyncListeners.get(projectId)!.add(listener);
+
+    return () => {
+      const set = this.resyncListeners.get(projectId);
+      if (set) {
+        set.delete(listener);
+        if (set.size === 0) this.resyncListeners.delete(projectId);
+      }
+    };
+  }
+
+  /**
    * Broadcast a committed patch to all subscribers for a project.
    */
   emit(projectId: string, patch: PatchEnvelope): void {
@@ -46,6 +67,22 @@ class PatchBroadcast {
     for (const listener of set) {
       try {
         listener(patch);
+      } catch {
+        // Don't let one bad listener break others
+      }
+    }
+  }
+
+  /**
+   * Broadcast a full resync (e.g. after component creation/deletion
+   * that modifies the head, which isn't covered by patch ops).
+   */
+  emitResync(projectId: string, html: string, txId: number): void {
+    const set = this.resyncListeners.get(projectId);
+    if (!set) return;
+    for (const listener of set) {
+      try {
+        listener(html, txId);
       } catch {
         // Don't let one bad listener break others
       }

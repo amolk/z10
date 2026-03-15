@@ -155,6 +155,7 @@ export async function POST(
       status: "rejected",
       reason: result.reason,
       conflicts: result.conflicts,
+      error: result.error instanceof Error ? result.error.message : result.error ? String(result.error) : undefined,
       freshHtml: freshHtml,
       freshManifest,
     });

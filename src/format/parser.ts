@@ -40,6 +40,7 @@ import type {
   GovernanceLevel,
 } from '../core/types.js';
 import { createDocument, createNode, addNode, addPage, parseInlineStyle } from '../core/document.js';
+import { toTagName, tagNameToComponentName } from '../core/types.js';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -125,6 +126,68 @@ function parseTokenCss(css: string, collection: TokenCollection, doc: Z10Documen
 // ---------------------------------------------------------------------------
 
 function extractComponents(html: string, doc: Z10Document): void {
+  // --- NEW format extraction (takes priority) ---
+
+  // Index new-format metadata blocks: <script type="application/z10+json" data-z10-role="component-meta" data-z10-component="Name">
+  const metaIndex = new Map<string, Record<string, unknown>>();
+  const metaRe = /<script\s+type="application\/z10\+json"\s+data-z10-role="component-meta"\s+data-z10-component="([^"]*)"\s*>([\s\S]*?)<\/script>/g;
+  let mm: RegExpExecArray | null;
+  while ((mm = metaRe.exec(html)) !== null) {
+    try {
+      metaIndex.set(mm[1]!, JSON.parse(mm[2]!.trim()) as Record<string, unknown>);
+    } catch {
+      // Skip malformed metadata blocks
+    }
+  }
+
+  // Index new-format templates: <template id="z10-name-template">
+  const newTemplateIndex = new Map<string, { template: string; styles: string }>();
+  const newTemplateRe = /<template\s+id="z10-([a-z0-9-]+)-template"\s*>([\s\S]*?)<\/template>/g;
+  let nt: RegExpExecArray | null;
+  while ((nt = newTemplateRe.exec(html)) !== null) {
+    const slug = nt[1]!;
+    const fullContent = nt[2]!;
+    // Extract <style> from inside the template
+    const styleMatch = fullContent.match(/<style[^>]*>([\s\S]*?)<\/style>/);
+    const styles = styleMatch ? styleMatch[1]!.trim() : '';
+    // Template HTML is the content minus the <style> block
+    const template = fullContent.replace(/<style[^>]*>[\s\S]*?<\/style>/, '').trim();
+    newTemplateIndex.set(slug, { template, styles });
+  }
+
+  // Index new-format class bodies: <script type="module" data-z10-component="Name">
+  const classBodyIndex = new Map<string, string>();
+  const classBodyRe = /<script\s+type="module"\s+data-z10-component="([^"]*)"\s*>([\s\S]*?)<\/script>/g;
+  let cb: RegExpExecArray | null;
+  while ((cb = classBodyRe.exec(html)) !== null) {
+    classBodyIndex.set(cb[1]!, cb[2]!.trim());
+  }
+
+  // Build ComponentSchema for each new-format component
+  for (const [name, meta] of metaIndex) {
+    const tagName = toTagName(name);
+    // Derive slug from tagName: strip "z10-" prefix
+    const slug = tagName.slice(4);
+    const tmpl = newTemplateIndex.get(slug);
+
+    const schema: ComponentSchema = {
+      name,
+      tagName,
+      category: typeof meta['category'] === 'string' ? meta['category'] : undefined,
+      description: typeof meta['description'] === 'string' ? meta['description'] : undefined,
+      props: parseComponentProps(meta['props']),
+      variants: parseComponentVariants(meta['variants']),
+      slots: Array.isArray(meta['slots']) ? meta['slots'] as string[] : undefined,
+      classBody: classBodyIndex.get(name) ?? '',
+      template: tmpl?.template ?? '',
+      styles: tmpl?.styles ?? '',
+    };
+
+    doc.components.set(name, schema);
+  }
+
+  // --- OLD format extraction (skips components already found in new format) ---
+
   // Pre-index all component styles and templates in a single pass
   const stylesIndex = new Map<string, string>();
   const templateIndex = new Map<string, string>();
@@ -151,14 +214,19 @@ function extractComponents(html: string, doc: Z10Document): void {
       const name = typeof raw['name'] === 'string' ? raw['name'] : '';
       if (!name) continue;
 
+      // Skip if already extracted via new format
+      if (doc.components.has(name)) continue;
+
       const schema: ComponentSchema = {
         name,
+        tagName: toTagName(name),
         description: typeof raw['description'] === 'string' ? raw['description'] : undefined,
         props: parseComponentProps(raw['props']),
         variants: parseComponentVariants(raw['variants']),
         slots: Array.isArray(raw['slots']) ? raw['slots'] as string[] : undefined,
         styles: stylesIndex.get(name) ?? '',
         template: templateIndex.get(name) ?? '',
+        classBody: '',
       };
 
       doc.components.set(name, schema);
@@ -231,7 +299,7 @@ function extractPages(html: string, doc: Z10Document): void {
 
 /** Recursively parse HTML nodes into Z10 nodes */
 function parseChildNodes(html: string, parentId: NodeId, doc: Z10Document): void {
-  const tagRe = /<(\w+)\s*([^>]*)(?:\/>|>([\s\S]*?)<\/\1>)/g;
+  const tagRe = /<([\w-]+)\s*([^>]*)(?:\/>|>([\s\S]*?)<\/\1>)/g;
   let match: RegExpExecArray | null;
 
   while ((match = tagRe.exec(html)) !== null) {
@@ -240,15 +308,37 @@ function parseChildNodes(html: string, parentId: NodeId, doc: Z10Document): void
     const innerHtml = match[3] ?? '';
 
     const id = extractAttrValue(attrStr, 'data-z10-id') ??
-               extractAttrValue(attrStr, 'data-z10-node') ??
                `${parentId}_${tag}_${match.index}`;
 
     const intent = (extractAttrValue(attrStr, 'data-z10-intent') ?? 'content') as NodeIntent;
     const editor = (extractAttrValue(attrStr, 'data-z10-editor') ?? 'designer') as NodeEditor;
     const agentEditable = extractAttrValue(attrStr, 'data-z10-agent-editable') !== 'false';
     const style = extractAttrValue(attrStr, 'style') ?? '';
-    const componentName = extractAttrValue(attrStr, 'data-z10-component');
     const textContent = getTextContent(innerHtml);
+
+    // Detect custom element tags (z10-* with hyphen)
+    const isCustomElement = tag.startsWith('z10-') && tag.includes('-');
+    const componentName = isCustomElement
+      ? (tagNameToComponentName(tag) ?? undefined)
+      : extractAttrValue(attrStr, 'data-z10-component');
+
+    // Parse custom element-specific attributes
+    let componentOverrides: Record<string, string | number | boolean> | undefined;
+    let componentVariant: string | undefined;
+    let componentDef: string | undefined;
+    let componentProps: Record<string, string | number | boolean> | undefined;
+
+    if (isCustomElement) {
+      const overridesStr = extractAttrValue(attrStr, 'data-z10-overrides');
+      if (overridesStr) {
+        try { componentOverrides = JSON.parse(overridesStr); } catch { /* skip */ }
+      }
+      componentVariant = extractAttrValue(attrStr, 'data-z10-variant') ?? undefined;
+      componentDef = extractAttrValue(attrStr, 'data-z10-component-def') ?? undefined;
+
+      // Collect regular HTML attributes (not data-z10-*, not style) as component props
+      componentProps = extractNonZ10Attributes(attrStr);
+    }
 
     const node = createNode({
       id,
@@ -260,6 +350,10 @@ function parseChildNodes(html: string, parentId: NodeId, doc: Z10Document): void
       agentEditable,
       textContent: textContent || undefined,
       componentName: componentName || undefined,
+      componentProps,
+      componentDef,
+      componentOverrides,
+      componentVariant,
       attributes: extractDataAttributes(attrStr),
     });
 
@@ -299,6 +393,38 @@ function extractDataAttributes(attrStr: string): Record<string, string> {
   return result;
 }
 
+/** Extract regular HTML attributes (not data-z10-*, not style, not class) as component props.
+ *  Handles both key="value" pairs and bare boolean attributes (e.g. `active`). */
+function extractNonZ10Attributes(attrStr: string): Record<string, string | number | boolean> | undefined {
+  const result: Record<string, string | number | boolean> = {};
+  // Match key="value" pairs
+  const kvRe = /([\w-]+)="([^"]*)"/g;
+  let match: RegExpExecArray | null;
+  let found = false;
+  const seenKeys = new Set<string>();
+  while ((match = kvRe.exec(attrStr)) !== null) {
+    const key = match[1]!;
+    seenKeys.add(key);
+    if (key.startsWith('data-z10-') || key === 'style' || key === 'class') continue;
+    found = true;
+    const val = match[2]!;
+    if (val === 'true') result[key] = true;
+    else if (val === 'false') result[key] = false;
+    else if (val !== '' && !isNaN(Number(val))) result[key] = Number(val);
+    else result[key] = val;
+  }
+  // Match bare boolean attributes (word not followed by =)
+  const bareRe = /(?:^|\s)([\w-]+)(?=\s|$)/g;
+  while ((match = bareRe.exec(attrStr)) !== null) {
+    const key = match[1]!;
+    if (seenKeys.has(key)) continue; // already handled as key="value"
+    if (key.startsWith('data-z10-') || key === 'style' || key === 'class') continue;
+    found = true;
+    result[key] = true;
+  }
+  return found ? result : undefined;
+}
+
 function getTextContent(html: string): string {
   // Fast path: if no tags present, skip regex
   if (!html.includes('<')) return html.trim();
@@ -307,7 +433,7 @@ function getTextContent(html: string): string {
 }
 
 function hasChildElements(html: string): boolean {
-  return /<\w+[\s>]/.test(html);
+  return /<[\w][\w-]*[\s>]/.test(html);
 }
 
 function escapeRegex(str: string): string {

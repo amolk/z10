@@ -13,6 +13,7 @@ import type {
   NodeEditor,
   GovernanceLevel,
 } from './types.js';
+import { toTagName } from './types.js';
 
 /** Default project configuration */
 function defaultConfig(): ProjectConfig {
@@ -86,6 +87,9 @@ export function createNode(opts: {
   componentName?: string;
   componentProps?: Record<string, string | number | boolean>;
   attributes?: Record<string, string>;
+  componentDef?: string;
+  componentOverrides?: Record<string, string | number | boolean>;
+  componentVariant?: string;
 }): Z10Node {
   return {
     id: opts.id,
@@ -100,6 +104,9 @@ export function createNode(opts: {
     agentEditable: opts.agentEditable ?? true,
     componentName: opts.componentName,
     componentProps: opts.componentProps,
+    componentDef: opts.componentDef,
+    componentOverrides: opts.componentOverrides,
+    componentVariant: opts.componentVariant,
   };
 }
 
@@ -243,6 +250,56 @@ export function setComponent(doc: Z10Document, schema: ComponentSchema): void {
 /** Get a component schema by name */
 export function getComponent(doc: Z10Document, name: string): ComponentSchema | undefined {
   return doc.components.get(name);
+}
+
+/** Validate and register a ComponentSchema, auto-generating tagName/classBody if missing.
+ *  Throws if the component name is not valid PascalCase (e.g. "MetricCard"). */
+export function registerComponent(doc: Z10Document, schema: ComponentSchema): void {
+  if (!schema.name || !/^[A-Z][A-Za-z0-9]*$/.test(schema.name)) {
+    throw new Error(
+      `Invalid component name "${schema.name}". Must be PascalCase starting with an uppercase letter (e.g. "MetricCard").`
+    );
+  }
+  const resolved: ComponentSchema = {
+    ...schema,
+    tagName: schema.tagName || toTagName(schema.name),
+    classBody: schema.classBody ?? '',
+  };
+  doc.components.set(resolved.name, resolved);
+}
+
+/** Remove a component schema by name. Returns true if it existed. */
+export function unregisterComponent(doc: Z10Document, name: string): boolean {
+  return doc.components.delete(name);
+}
+
+/** Return all nodes whose tag matches the component's tagName (starts with z10-) */
+export function findInstances(doc: Z10Document, componentName: string): Z10Node[] {
+  const schema = doc.components.get(componentName);
+  if (!schema) return [];
+  const tag = schema.tagName;
+  const result: Z10Node[] = [];
+  doc.nodes.forEach((node) => {
+    if (node.tag === tag) {
+      result.push(node);
+    }
+  });
+  return result;
+}
+
+/** Replace a custom element node with a plain <div>, preserving attributes/styles but removing component association */
+export function detachInstance(doc: Z10Document, instanceId: NodeId): Z10Node | undefined {
+  const node = doc.nodes.get(instanceId);
+  if (!node) return undefined;
+
+  node.tag = 'div';
+  node.componentName = undefined;
+  node.componentProps = undefined;
+  node.componentDef = undefined;
+  node.componentOverrides = undefined;
+  node.componentVariant = undefined;
+
+  return node;
 }
 
 // ---------------------------------------------------------------------------

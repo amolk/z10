@@ -190,6 +190,116 @@ export async function fetchTokens(projectId: string): Promise<{
   return await res.json() as { primitives: Record<string, string>; semantic: Record<string, string> };
 }
 
+// ── Component API functions ──
+
+export interface ComponentListResult {
+  components: string[];
+  schemas?: Record<string, unknown>[];
+}
+
+/** List components, optionally with full detail */
+export async function fetchComponentList(
+  projectId: string,
+  verbose?: boolean,
+): Promise<ComponentListResult> {
+  const baseUrl = await getBaseUrl();
+  const headers = await getAuthHeaders();
+  const qs = verbose ? '?verbose=true' : '';
+
+  const res = await fetch(`${baseUrl}/api/projects/${projectId}/components${qs}`, {
+    method: 'GET',
+    headers,
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to fetch components (${res.status}): ${await res.text()}`);
+  }
+
+  return await res.json() as ComponentListResult;
+}
+
+/** Get full detail for a single component */
+export async function fetchComponentDetail(
+  projectId: string,
+  name: string,
+): Promise<Record<string, unknown>> {
+  const baseUrl = await getBaseUrl();
+  const headers = await getAuthHeaders();
+
+  const res = await fetch(`${baseUrl}/api/projects/${projectId}/components/${encodeURIComponent(name)}`, {
+    method: 'GET',
+    headers,
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to fetch component "${name}" (${res.status}): ${await res.text()}`);
+  }
+
+  return await res.json() as Record<string, unknown>;
+}
+
+/** Create a new component */
+export async function createComponent(
+  projectId: string,
+  name: string,
+  definition: Record<string, unknown>,
+): Promise<{ tagName?: string }> {
+  const baseUrl = await getBaseUrl();
+  const headers = await getAuthHeaders();
+
+  const res = await fetch(`${baseUrl}/api/projects/${projectId}/components`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ name, ...definition }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to create component (${res.status}): ${await res.text()}`);
+  }
+
+  return await res.json() as { tagName?: string };
+}
+
+/** Update an existing component */
+export async function updateComponent(
+  projectId: string,
+  name: string,
+  definition: Record<string, unknown>,
+): Promise<void> {
+  const baseUrl = await getBaseUrl();
+  const headers = await getAuthHeaders();
+
+  const res = await fetch(`${baseUrl}/api/projects/${projectId}/components/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify(definition),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to update component "${name}" (${res.status}): ${await res.text()}`);
+  }
+}
+
+/** Delete a component */
+export async function deleteComponent(
+  projectId: string,
+  name: string,
+  detach?: boolean,
+): Promise<void> {
+  const baseUrl = await getBaseUrl();
+  const headers = await getAuthHeaders();
+  const qs = detach ? '?detach=true' : '';
+
+  const res = await fetch(`${baseUrl}/api/projects/${projectId}/components/${encodeURIComponent(name)}${qs}`, {
+    method: 'DELETE',
+    headers,
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to delete component "${name}" (${res.status}): ${await res.text()}`);
+  }
+}
+
 // ── New collaborative DOM API functions (Phase B/C) ──
 
 export interface SyncResult {

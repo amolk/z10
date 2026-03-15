@@ -89,10 +89,16 @@ export async function GET(
         send(JSON.stringify({ type: "patch", patch }));
       });
 
+      // Subscribe to resync broadcasts (e.g. after component create/delete)
+      const unsubscribeResync = patchBroadcast.subscribeResync(projectId, (html, txId) => {
+        send(JSON.stringify({ type: "resync", html, txId }));
+      });
+
       // Cleanup on client disconnect
       const cleanup = () => {
         clearInterval(heartbeat);
         unsubscribe();
+        unsubscribeResync();
       };
 
       request.signal.addEventListener("abort", cleanup);

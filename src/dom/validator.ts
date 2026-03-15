@@ -45,6 +45,14 @@ export interface Conflict {
   liveTs: number;
 }
 
+// ── Helpers ──
+
+/** Find element by data-z10-id, including the root element itself. */
+function findByNid(root: Element, nid: string): Element | null {
+  if (root.getAttribute('data-z10-id') === nid) return root;
+  return root.querySelector(`[data-z10-id="${nid}"]`);
+}
+
 // ── Fast pre-check using ts-tree ──
 
 /**
@@ -57,7 +65,7 @@ export function preCheckTreeTimestamp(
   manifestTreeTs: number,
   liveDOM: Element,
 ): boolean {
-  const el = liveDOM.querySelector(`[data-z10-id="${subtreeRootNid}"]`);
+  const el = findByNid(liveDOM, subtreeRootNid);
   if (!el) return false; // node gone — definitely changed
   const liveTreeTs = getTimestamp(el, 'data-z10-ts-tree');
   return liveTreeTs <= manifestTreeTs;
@@ -85,7 +93,7 @@ export function validate(
       continue;
     }
 
-    const el = liveDOM.querySelector(`[data-z10-id="${entry.nid}"]`);
+    const el = findByNid(liveDOM, entry.nid);
     if (!el) {
       // Node was deleted from live DOM since manifest was taken
       conflicts.push({

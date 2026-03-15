@@ -13,6 +13,7 @@ import type {
   TokenSet,
   NodeId,
 } from '../core/types.js';
+import { toTagName, isZ10CustomElement } from '../core/types.js';
 import { getChildren, serializeStyle } from '../core/document.js';
 
 // ---------------------------------------------------------------------------
@@ -98,31 +99,37 @@ function serializeTokens(tokens: TokenSet): string {
 
 function serializeComponent(schema: ComponentSchema): string {
   const parts: string[] = [];
+  const tagName = schema.tagName || toTagName(schema.name);
 
-  // Component metadata JSON
-  const metadata: Record<string, unknown> = {
-    name: schema.name,
-    props: schema.props,
-    variants: schema.variants,
-  };
-  if (schema.description) metadata['description'] = schema.description;
-  if (schema.slots) metadata['slots'] = schema.slots;
+  // 1. Z10 metadata JSON
+  const metadata: Record<string, unknown> = {};
+  if (schema.description) metadata.description = schema.description;
+  if (schema.category) metadata.category = schema.category;
+  metadata.props = schema.props;
+  metadata.variants = schema.variants;
+  if (schema.slots) metadata.slots = schema.slots;
 
+  const metaJson = JSON.stringify(metadata, null, 2).replace(/<\/(script)/gi, '<\\/$1');
   parts.push(
-    `<script type="application/z10+json" data-z10-role="component">\n${JSON.stringify(metadata, null, 2)}\n</script>`,
+    `<script type="application/z10+json" data-z10-role="component-meta" data-z10-component="${escapeHtml(schema.name)}">\n${metaJson}\n</script>`,
   );
 
-  // Component styles
+  // 2. Template with embedded styles
+  const templateId = `${tagName}-template`;
+  const templateParts: string[] = [];
   if (schema.styles) {
-    parts.push(
-      `<style data-z10-component-styles="${escapeHtml(schema.name)}">\n${schema.styles}\n</style>`,
-    );
+    const safeStyles = schema.styles.replace(/<\/(style)/gi, '<\\/$1');
+    templateParts.push(`  <style>\n${safeStyles.split('\n').map(l => '    ' + l).join('\n')}\n  </style>`);
   }
-
-  // Component template
   if (schema.template) {
+    templateParts.push(`  ${schema.template}`);
+  }
+  parts.push(`<template id="${templateId}">\n${templateParts.join('\n')}\n</template>`);
+
+  // 3. Script module with class body
+  if (schema.classBody) {
     parts.push(
-      `<template data-z10-template="${escapeHtml(schema.name)}">\n${schema.template}\n</template>`,
+      `<script type="module" data-z10-component="${escapeHtml(schema.name)}">\n${schema.classBody.replace(/<\/(script)/gi, '<\\/$1')}\n</script>`,
     );
   }
 
@@ -152,16 +159,17 @@ function serializeChildren(doc: Z10Document, parentId: NodeId, depth: number): s
 
 function serializeNode(doc: Z10Document, node: Z10Node, depth: number): string {
   const indent = '  '.repeat(depth);
+  const tag = node.tag;
   const attrs = buildNodeAttributes(node);
   const children = getChildren(doc, node.id);
 
   if (children.length === 0 && !node.textContent) {
     // Self-closing style for empty nodes
-    return `${indent}<${node.tag}${attrs}></${node.tag}>`;
+    return `${indent}<${tag}${attrs}></${tag}>`;
   }
 
   const parts: string[] = [];
-  parts.push(`${indent}<${node.tag}${attrs}>`);
+  parts.push(`${indent}<${tag}${attrs}>`);
 
   if (node.textContent) {
     parts.push(`${indent}  ${escapeHtml(node.textContent)}`);
@@ -171,7 +179,7 @@ function serializeNode(doc: Z10Document, node: Z10Node, depth: number): string {
     parts.push(serializeChildren(doc, node.id, depth + 1));
   }
 
-  parts.push(`${indent}</${node.tag}>`);
+  parts.push(`${indent}</${tag}>`);
   return parts.join('\n');
 }
 
@@ -183,6 +191,18 @@ function buildNodeAttributes(node: Z10Node): string {
 
   if (node.componentName) {
     attrs.push(`data-z10-component="${escapeHtml(node.componentName)}"`);
+  }
+
+  if (node.componentDef) {
+    attrs.push(`data-z10-component-def="${escapeHtml(node.componentDef)}"`);
+  }
+
+  if (node.componentOverrides) {
+    attrs.push(`data-z10-overrides="${escapeHtml(JSON.stringify(node.componentOverrides))}"`);
+  }
+
+  if (node.componentVariant) {
+    attrs.push(`data-z10-variant="${escapeHtml(node.componentVariant)}"`);
   }
 
   if (node.intent !== 'content') {
@@ -205,13 +225,25 @@ function buildNodeAttributes(node: Z10Node): string {
 
   // Additional data-z10 attributes (skip ones we already handle)
   const handledAttrs = new Set([
-    'data-z10-id', 'data-z10-component', 'data-z10-intent',
-    'data-z10-editor', 'data-z10-agent-editable', 'data-z10-node',
+    'data-z10-id', 'data-z10-component', 'data-z10-component-def',
+    'data-z10-overrides', 'data-z10-variant', 'data-z10-intent',
+    'data-z10-editor', 'data-z10-agent-editable',
     'data-z10-page', 'data-z10-mode',
   ]);
   for (const [key, value] of Object.entries(node.attributes)) {
     if (!handledAttrs.has(key)) {
       attrs.push(`${key}="${escapeHtml(value)}"`);
+    }
+  }
+
+  // For custom element instances, serialize component props as HTML attributes
+  if (isZ10CustomElement(node.tag) && node.componentProps) {
+    for (const [key, value] of Object.entries(node.componentProps)) {
+      if (typeof value === 'boolean') {
+        if (value) attrs.push(key);
+      } else {
+        attrs.push(`${key}="${escapeHtml(String(value))}"`);
+      }
     }
   }
 

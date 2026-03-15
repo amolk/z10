@@ -63,19 +63,21 @@ describe('Z10 HTML Serializer', () => {
     it('serializes component metadata, styles, and template', () => {
       const schema: ComponentSchema = {
         name: 'Button',
+        tagName: 'z10-button',
         props: [{ name: 'variant', type: 'enum', options: ['primary'], default: 'primary' }],
         variants: [{ name: 'primary', props: { variant: 'primary' } }],
         styles: '.btn { padding: 8px; }',
         template: '<button class="btn"><slot /></button>',
+        classBody: '',
       };
       setComponent(doc, schema);
       const html = serializeZ10Html(doc);
 
-      expect(html).toContain('data-z10-role="component"');
-      expect(html).toContain('"name": "Button"');
-      expect(html).toContain('data-z10-component-styles="Button"');
+      // New Web Components format: 3 head blocks
+      expect(html).toContain('data-z10-role="component-meta"');
+      expect(html).toContain('data-z10-component="Button"');
       expect(html).toContain('.btn { padding: 8px; }');
-      expect(html).toContain('data-z10-template="Button"');
+      expect(html).toContain('id="z10-button-template"');
       expect(html).toContain('<button class="btn">');
     });
   });

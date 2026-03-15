@@ -9,6 +9,9 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { useEditor } from "@/lib/editor-state";
+import { isContainer, isTextEditable } from "@/lib/node-inference";
+import { SELECTION_COLOR, COMPONENT_COLOR } from "@/lib/editor-constants";
+import { tagNameToComponentName } from "z10/core";
 
 type ViewTransform = {
   x: number;
@@ -21,8 +24,7 @@ type Rect = { x: number; y: number; w: number; h: number };
 const MIN_ZOOM = 0.02;
 const MAX_ZOOM = 64;
 const ZOOM_STEP = 1.8;
-const SELECTION_COLOR = "#0D99FF";
-const HOVER_COLOR = "#0D99FF";
+const HOVER_COLOR = SELECTION_COLOR;
 
 // ─── Interaction modes ──────────────────────────────────────
 type OrigInfo = { left: number; top: number; isAbsolute: boolean; parentId: string | null };
@@ -41,17 +43,41 @@ type DragMode =
   | { type: "rotate"; centerX: number; centerY: number; startAngle: number; origRotation: number; elementId: string }
   | { type: "marquee"; startX: number; startY: number };
 
+// ─── Per-page view persistence ──────────────────────────────
+function viewStorageKey(projectId: string, pageId: string) {
+  return `z10-view:${projectId}:${pageId}`;
+}
+
+function saveViewForPage(projectId: string, pageId: string, view: ViewTransform) {
+  try {
+    localStorage.setItem(viewStorageKey(projectId, pageId), JSON.stringify(view));
+  } catch {}
+}
+
+function loadViewForPage(projectId: string, pageId: string): ViewTransform | null {
+  try {
+    const raw = localStorage.getItem(viewStorageKey(projectId, pageId));
+    if (!raw) return null;
+    const v = JSON.parse(raw);
+    if (typeof v.x === "number" && typeof v.y === "number" && typeof v.scale === "number") return v;
+  } catch {}
+  return null;
+}
+
 export function EditorCanvas({
+  projectId,
   initialContent,
   saveState = "saved",
 }: {
+  projectId: string;
   initialContent: string;
   saveState?: "saved" | "saving" | "unsaved";
 }) {
-  const { selectedIds, select, clearSelection, transformRef, activeTool, setActiveTool, content, updateElementStyle, updateContent, activePageId } = useEditor();
+  const { selectedIds, select, clearSelection, transformRef, activeTool, setActiveTool, content, updateElementStyle, updateContent, activePageId, editingTextId, startTextEdit, commitTextEdit } = useEditor();
 
   // ─── Canvas pan/zoom state ─────────────────────────────────
   const canvasRef = useRef<HTMLDivElement>(null);
+  const viewInitialized = useRef(false);
   const [view, setView] = useState<ViewTransform>({ x: 0, y: 0, scale: 0.5 });
   const [spaceHeld, setSpaceHeld] = useState(false);
   const [dragMode, setDragMode] = useState<DragMode>({ type: "none" });
@@ -253,8 +279,7 @@ export function EditorCanvas({
 
       // Not a flow container — check if it's a page or frame that could accept children
       const isPage = targetEl.hasAttribute("data-z10-page");
-      const isFrame = targetEl.hasAttribute("data-z10-node") && targetEl.getAttribute("data-z10-node") === "Frame";
-      if (isPage || isFrame || targetEl.children.length > 0) {
+      if (isPage || isContainer(targetEl)) {
         const cRect = computeElementRect(targetId);
         if (cRect) return { kind: "into-container", containerId: targetId, containerRect: cRect };
       }
@@ -392,34 +417,90 @@ export function EditorCanvas({
         return;
       }
 
+      // If editing text, click outside commits and stops further processing
+      if (editingTextId) {
+        const editingEl = transformRef.current?.querySelector(
+          `[data-z10-id="${editingTextId}"]`
+        ) as HTMLElement;
+        if (editingEl && !editingEl.contains(e.target as Node)) {
+          editingEl.blur();
+        }
+        return;
+      }
+
       const foundId = findZ10Id(e.target as HTMLElement);
 
-      // Frame or Text tool: create new element at click position
-      if ((activeTool === "frame" || activeTool === "text") && !foundId) {
+      // Text tool: create new text element
+      if (activeTool === "text") {
         const canvasRect = canvasRef.current?.getBoundingClientRect();
         if (!canvasRect) return;
         const cx = Math.round((e.clientX - canvasRect.left - view.x) / view.scale);
         const cy = Math.round((e.clientY - canvasRect.top - view.y) / view.scale);
-        const newId = `${activeTool}_${Date.now()}`;
+        const newId = `text_${Date.now()}`;
+        const transformEl = transformRef.current;
+        if (!transformEl || !activePageId) return;
 
-        // Find the active page element to insert into
+        // Determine parent: clicked element or page
+        let parentId = activePageId;
+        let relX = cx;
+        let relY = cy;
+        if (foundId) {
+          parentId = foundId;
+          // Calculate position relative to the clicked element
+          const parentEl = transformEl.querySelector(`[data-z10-id="${foundId}"]`) as HTMLElement;
+          if (parentEl) {
+            const parentRect = parentEl.getBoundingClientRect();
+            const canvasR = canvasRef.current!.getBoundingClientRect();
+            relX = Math.round((e.clientX - parentRect.left) / view.scale);
+            relY = Math.round((e.clientY - parentRect.top) / view.scale);
+          }
+        }
+
+        // Create in live DOM
+        const parentEl = transformEl.querySelector(`[data-z10-id="${parentId}"]`);
+        if (!parentEl) return;
+
+        const newEl = document.createElement("p");
+        newEl.setAttribute("data-z10-id", newId);
+        newEl.setAttribute("style", `position: absolute; left: ${relX}px; top: ${relY}px; font-size: 16px; color: #000000;`);
+        newEl.textContent = "Text";
+        parentEl.appendChild(newEl);
+
+        // Serialize back to content
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(content || "", "text/html");
+        const targetParent = doc.querySelector(`[data-z10-id="${parentId}"]`);
+        if (targetParent) {
+          const cloned = doc.createElement("p");
+          cloned.setAttribute("data-z10-id", newId);
+          cloned.setAttribute("style", newEl.getAttribute("style") || "");
+          cloned.textContent = "Text";
+          targetParent.appendChild(cloned);
+          updateContent(`<html${doc.documentElement.getAttribute("data-z10-project") ? ` data-z10-project="${doc.documentElement.getAttribute("data-z10-project")}"` : ""}>\n${doc.documentElement.innerHTML}\n</html>`);
+        }
+
+        select(newId);
+        setActiveTool("select");
+        return;
+      }
+
+      // Frame tool: create new frame at click position (only on empty canvas)
+      if (activeTool === "frame" && !foundId) {
+        const canvasRect = canvasRef.current?.getBoundingClientRect();
+        if (!canvasRect) return;
+        const cx = Math.round((e.clientX - canvasRect.left - view.x) / view.scale);
+        const cy = Math.round((e.clientY - canvasRect.top - view.y) / view.scale);
+        const newId = `frame_${Date.now()}`;
+
         const transformEl = transformRef.current;
         if (transformEl && activePageId) {
           const pageEl = transformEl.querySelector(`[data-z10-id="${activePageId}"]`);
           if (pageEl) {
             const newEl = document.createElement("div");
             newEl.setAttribute("data-z10-id", newId);
-            if (activeTool === "frame") {
-              newEl.setAttribute("style", `position: absolute; left: ${cx}px; top: ${cy}px; width: 200px; height: 150px; background-color: #ffffff; border-radius: 8px;`);
-              newEl.setAttribute("data-z10-node", "Frame");
-            } else {
-              newEl.setAttribute("style", `position: absolute; left: ${cx}px; top: ${cy}px; font-size: 16px; color: #000000;`);
-              newEl.textContent = "Text";
-              newEl.setAttribute("data-z10-node", "Text");
-            }
+            newEl.setAttribute("style", `position: absolute; left: ${cx}px; top: ${cy}px; width: 200px; height: 150px; display: flex; background-color: #ffffff; border-radius: 8px;`);
             pageEl.appendChild(newEl);
 
-            // Serialize back to content
             const parser = new DOMParser();
             const doc = parser.parseFromString(content || "", "text/html");
             const targetPage = doc.querySelector(`[data-z10-id="${activePageId}"]`);
@@ -427,8 +508,6 @@ export function EditorCanvas({
               const cloned = doc.createElement("div");
               cloned.setAttribute("data-z10-id", newId);
               cloned.setAttribute("style", newEl.getAttribute("style") || "");
-              cloned.setAttribute("data-z10-node", newEl.getAttribute("data-z10-node") || "");
-              if (activeTool === "text") cloned.textContent = "Text";
               targetPage.appendChild(cloned);
               updateContent(`<html${doc.documentElement.getAttribute("data-z10-project") ? ` data-z10-project="${doc.documentElement.getAttribute("data-z10-project")}"` : ""}>\n${doc.documentElement.innerHTML}\n</html>`);
             }
@@ -446,19 +525,148 @@ export function EditorCanvas({
         clearSelection();
       }
     },
-    [dragMode.type, spaceHeld, activeTool, findZ10Id, select, clearSelection, view, transformRef, content, updateContent, setActiveTool, activePageId]
+    [dragMode.type, spaceHeld, activeTool, findZ10Id, select, clearSelection, view, transformRef, content, updateContent, setActiveTool, activePageId, editingTextId]
   );
 
-  // ─── Escape to deselect ────────────────────────────────────
+  // ─── Escape to deselect (or exit text editing) ─────────────
+  // ─── Enter to start text editing on selected text element ──
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
+        if (editingTextId) {
+          const el = transformRef.current?.querySelector(
+            `[data-z10-id="${editingTextId}"]`
+          ) as HTMLElement;
+          if (el) el.blur();
+          return;
+        }
         clearSelection();
+      }
+
+      // Enter on a selected text element → start editing
+      if (e.key === "Enter" && !editingTextId && activeTool === "select") {
+        if (selectedIds.size !== 1) return;
+        const id = selectedIds.values().next().value as string;
+        const transformEl = transformRef.current;
+        if (!transformEl) return;
+        const el = transformEl.querySelector(`[data-z10-id="${id}"]`) as HTMLElement;
+        if (!el) return;
+
+        if (isTextEditable(el)) {
+          e.preventDefault();
+          startTextEdit(id);
+        }
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [clearSelection]);
+  }, [clearSelection, editingTextId, transformRef, activeTool, selectedIds, startTextEdit]);
+
+  // ─── Double-click to edit text inline ─────────────────────
+  const handleDoubleClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (activeTool !== "select") return;
+      const foundId = findZ10Id(e.target as HTMLElement);
+      if (!foundId) return;
+
+      const transformEl = transformRef.current;
+      if (!transformEl) return;
+      const el = transformEl.querySelector(`[data-z10-id="${foundId}"]`) as HTMLElement;
+      if (!el) return;
+
+      if (isTextEditable(el)) {
+        e.stopPropagation();
+        e.preventDefault();
+        startTextEdit(foundId);
+      }
+    },
+    [activeTool, findZ10Id, transformRef, startTextEdit]
+  );
+
+  // ─── Double-click on SelectionOverlay to edit text ─────────
+  const handleOverlayDoubleClick = useCallback(
+    (e: React.MouseEvent, elementId: string) => {
+      if (activeTool !== "select") return;
+      const transformEl = transformRef.current;
+      if (!transformEl) return;
+      const el = transformEl.querySelector(`[data-z10-id="${elementId}"]`) as HTMLElement;
+      if (!el) return;
+
+      if (isTextEditable(el)) {
+        e.stopPropagation();
+        e.preventDefault();
+        startTextEdit(elementId);
+      }
+    },
+    [activeTool, transformRef, startTextEdit]
+  );
+
+  // ─── Manage contentEditable when editingTextId changes ────
+  useEffect(() => {
+    if (!editingTextId) return;
+
+    const transformEl = transformRef.current;
+    if (!transformEl) return;
+    const el = transformEl.querySelector(`[data-z10-id="${editingTextId}"]`) as HTMLElement;
+    if (!el) return;
+
+    // Make editable
+    el.contentEditable = "true";
+    el.focus();
+
+    // Select all text
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+
+    // Visual indicator
+    el.style.outline = `2px solid ${SELECTION_COLOR}`;
+    el.style.outlineOffset = "2px";
+    el.style.cursor = "text";
+
+    const capturedId = editingTextId;
+
+    function handleBlur() {
+      el.contentEditable = "false";
+      el.style.removeProperty("outline");
+      el.style.removeProperty("outline-offset");
+      el.style.cursor = "";
+
+      // Persist the edited text to serialized content
+      const newText = el.textContent || "";
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(content || "", "text/html");
+      const target = doc.querySelector(`[data-z10-id="${capturedId}"]`) as HTMLElement;
+      if (target) {
+        target.textContent = newText;
+        updateContent(
+          `<html${doc.documentElement.getAttribute("data-z10-project") ? ` data-z10-project="${doc.documentElement.getAttribute("data-z10-project")}"` : ""}>\n${doc.documentElement.innerHTML}\n</html>`
+        );
+      }
+
+      commitTextEdit();
+    }
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        el.blur();
+      }
+      // Stop propagation so tool shortcuts / delete / arrow keys don't fire
+      e.stopPropagation();
+    }
+
+    el.addEventListener("blur", handleBlur);
+    el.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      el.removeEventListener("blur", handleBlur);
+      el.removeEventListener("keydown", handleKeyDown);
+      el.contentEditable = "false";
+    };
+  }, [editingTextId, transformRef, commitTextEdit, content, updateContent]);
 
   // ─── Zoom around point ─────────────────────────────────────
   const zoomAtPoint = useCallback(
@@ -503,6 +711,7 @@ export function EditorCanvas({
   // ─── Space key for hand tool ───────────────────────────────
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
+      if (editingTextId) return; // Don't hijack space when editing text
       if (e.code === "Space" && !e.repeat) {
         e.preventDefault();
         setSpaceHeld(true);
@@ -520,11 +729,12 @@ export function EditorCanvas({
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, []);
+  }, [editingTextId]);
 
   // ─── Arrow keys to nudge selected elements ─────────────────
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
+      if (editingTextId) return; // Don't hijack arrows when editing text
       if (selectedIds.size === 0) return;
       const step = e.shiftKey ? 10 : 1;
       let dx = 0, dy = 0;
@@ -574,7 +784,7 @@ export function EditorCanvas({
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedIds, transformRef, updateElementStyle, computeElementRect]);
+  }, [selectedIds, transformRef, updateElementStyle, computeElementRect, editingTextId]);
 
   // ─── Pointer interactions: pan, move, resize, marquee ──────
   const handlePointerDown = useCallback(
@@ -593,8 +803,8 @@ export function EditorCanvas({
         return;
       }
 
-      // Left click in select mode
-      if (e.button === 0 && activeTool === "select") {
+      // Left click in select mode (skip if editing text inline)
+      if (e.button === 0 && activeTool === "select" && !editingTextId) {
         const foundId = findZ10Id(e.target as HTMLElement);
 
         if (foundId) {
@@ -658,7 +868,7 @@ export function EditorCanvas({
         }
       }
     },
-    [spaceHeld, activeTool, view.x, view.y, view.scale, findZ10Id, selectedIds, select, transformRef]
+    [spaceHeld, activeTool, view.x, view.y, view.scale, findZ10Id, selectedIds, select, transformRef, editingTextId]
   );
 
   const handlePointerMove_drag = useCallback(
@@ -1193,16 +1403,49 @@ export function EditorCanvas({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [zoomToFit, zoomTo100]);
 
-  // Zoom to fit when active page changes
+  // Track current view in a ref so page-switch can save without re-triggering
+  const viewRef = useRef(view);
+  viewRef.current = view;
+
+  // Ref to zoomToFit so the page-switch effect doesn't depend on it
+  const zoomToFitRef = useRef(zoomToFit);
+  zoomToFitRef.current = zoomToFit;
+
+  // Restore saved view or zoom-to-fit when active page changes
   const prevPageId = useRef<string | null>(null);
+  const activePageId_ = activePage?.id ?? null;
   useEffect(() => {
-    if (!activePage) return;
-    if (prevPageId.current !== activePage.id) {
-      prevPageId.current = activePage.id;
-      const timer = setTimeout(zoomToFit, 50);
+    if (!activePageId_) return;
+    if (prevPageId.current === activePageId_) return;
+    // Save outgoing page's view before switching
+    if (prevPageId.current) {
+      saveViewForPage(projectId, prevPageId.current, viewRef.current);
+    }
+    prevPageId.current = activePageId_;
+    const saved = loadViewForPage(projectId, activePageId_);
+    if (saved) {
+      setView(saved);
+      viewInitialized.current = true;
+    } else {
+      // Use a short delay so canvasRef is measured correctly
+      const timer = setTimeout(() => {
+        zoomToFitRef.current();
+        viewInitialized.current = true;
+      }, 50);
       return () => clearTimeout(timer);
     }
-  }, [activePage, zoomToFit]);
+  }, [activePageId_, projectId]);
+
+  // Persist view to localStorage (debounced) — skip until first restore/fit
+  const viewSaveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => {
+    if (!activePageId_ || !viewInitialized.current) return;
+    clearTimeout(viewSaveTimer.current);
+    viewSaveTimer.current = setTimeout(() => {
+      saveViewForPage(projectId, activePageId_, view);
+    }, 300);
+    return () => clearTimeout(viewSaveTimer.current);
+  }, [view, activePageId_, projectId]);
 
   const zoomPercent = Math.round(view.scale * 100);
   const isPanning = dragMode.type === "pan";
@@ -1248,6 +1491,7 @@ export function EditorCanvas({
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
         onClick={handleCanvasClick}
+        onDoubleClick={handleDoubleClick}
       >
         {/* Transform layer */}
         <div
@@ -1337,17 +1581,37 @@ export function EditorCanvas({
           )}
 
           {/* ─── Selection overlays ─────────────────────────── */}
-          {Array.from(selectionRects.entries()).map(([id, rect]) => (
-            <SelectionOverlay
-              key={id}
-              elementId={id}
-              rect={rect}
-              scale={view.scale}
-              onResizeStart={handleResizeStart}
-              onMoveStart={handleMoveStart}
-              onRotateStart={handleRotateStart}
-            />
-          ))}
+          {Array.from(selectionRects.entries()).map(([id, rect]) => {
+            if (editingTextId === id) return null;
+            // Detect component status from live DOM
+            const el = transformRef.current?.querySelector(`[data-z10-id="${id}"]`) as HTMLElement | null;
+            const isCustomEl = el ? el.tagName.includes("-") && el.tagName.toLowerCase().startsWith("z10-") : false;
+            const compDef = el?.getAttribute("data-z10-component-def") ?? undefined;
+            const isComp = isCustomEl || !!compDef || !!el?.getAttribute("data-z10-component");
+            let compName: string | undefined;
+            if (compDef) {
+              compName = compDef;
+            } else if (isCustomEl && el) {
+              compName = tagNameToComponentName(el.tagName.toLowerCase()) ?? undefined;
+            } else if (el?.getAttribute("data-z10-component")) {
+              compName = el.getAttribute("data-z10-component") ?? undefined;
+            }
+            return (
+              <SelectionOverlay
+                key={id}
+                elementId={id}
+                rect={rect}
+                scale={view.scale}
+                onResizeStart={handleResizeStart}
+                onMoveStart={handleMoveStart}
+                onRotateStart={handleRotateStart}
+                onDoubleClick={handleOverlayDoubleClick}
+                isComponent={isComp}
+                isComponentDef={!!compDef}
+                componentName={compName}
+              />
+            );
+          })}
 
           {/* ─── Drop target indicators ─────────────────────── */}
           {dropTarget && dropTarget.kind === "flow-insert" && (
@@ -1452,6 +1716,10 @@ function SelectionOverlay({
   onResizeStart,
   onMoveStart,
   onRotateStart,
+  onDoubleClick,
+  isComponent,
+  isComponentDef,
+  componentName,
 }: {
   elementId: string;
   rect: Rect;
@@ -1459,7 +1727,12 @@ function SelectionOverlay({
   onResizeStart: (e: React.PointerEvent, handleIndex: number, elementId: string, rect: Rect) => void;
   onMoveStart: (e: React.PointerEvent) => void;
   onRotateStart: (e: React.PointerEvent, elementId: string, rect: Rect) => void;
+  onDoubleClick?: (e: React.MouseEvent, elementId: string) => void;
+  isComponent?: boolean;
+  isComponentDef?: boolean;
+  componentName?: string;
 }) {
+  const color = isComponent || isComponentDef ? COMPONENT_COLOR : SELECTION_COLOR;
   const handleSize = 8 / scale;
   const borderWidth = 1.5 / scale;
   const labelFontSize = 11 / scale;
@@ -1490,11 +1763,12 @@ function SelectionOverlay({
           top: rect.y,
           width: rect.w,
           height: rect.h,
-          border: `${borderWidth}px solid ${SELECTION_COLOR}`,
+          border: `${borderWidth}px ${isComponent && !isComponentDef ? 'dashed' : 'solid'} ${color}`,
           borderRadius: 1 / scale,
           cursor: "move",
         }}
         onPointerDown={onMoveStart}
+        onDoubleClick={(e) => onDoubleClick?.(e, elementId)}
       />
 
       {/* 8 resize handles */}
@@ -1507,7 +1781,7 @@ function SelectionOverlay({
             top: h.cy - handleSize / 2,
             width: handleSize,
             height: handleSize,
-            borderColor: SELECTION_COLOR,
+            borderColor: color,
             borderWidth: borderWidth,
             cursor: h.cursor,
           }}
@@ -1523,7 +1797,7 @@ function SelectionOverlay({
           top: rect.y - rotateHandleOffset,
           width: borderWidth,
           height: rotateHandleOffset,
-          backgroundColor: SELECTION_COLOR,
+          backgroundColor: color,
           transformOrigin: "bottom center",
         }}
       />
@@ -1534,22 +1808,39 @@ function SelectionOverlay({
           top: rect.y - rotateHandleOffset - rotateHandleSize / 2,
           width: rotateHandleSize,
           height: rotateHandleSize,
-          borderColor: SELECTION_COLOR,
+          borderColor: color,
           borderWidth: borderWidth,
           cursor: "grab",
         }}
         onPointerDown={(e) => onRotateStart(e, elementId, rect)}
       />
 
+      {/* Component name label */}
+      {componentName && (
+        <div
+          className="pointer-events-none absolute whitespace-nowrap text-white"
+          style={{
+            left: rect.x,
+            top: rect.y - labelFontSize - labelPad * 4,
+            fontSize: labelFontSize,
+            padding: `${labelPad / 2}px ${labelPad}px`,
+            background: COMPONENT_COLOR,
+            borderRadius: 2 / scale,
+          }}
+        >
+          {isComponentDef ? "◆ " : "◇ "}{componentName}
+        </div>
+      )}
+
       {/* Dimensions label */}
       <div
         className="pointer-events-none absolute whitespace-nowrap rounded text-white"
         style={{
           left: rect.x + rect.w + handleSize,
-          top: rect.y - labelFontSize - labelPad * 3,
+          top: rect.y - labelFontSize - labelPad * 4,
           fontSize: labelFontSize,
           padding: `${labelPad / 2}px ${labelPad}px`,
-          background: SELECTION_COLOR,
+          background: color,
           borderRadius: 2 / scale,
         }}
       >

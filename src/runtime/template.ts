@@ -107,6 +107,48 @@ export function resolveProps(
   return merged;
 }
 
+/**
+ * Resolve effective attributes for a component instance.
+ * Priority: schema prop defaults → variant props → overrides
+ *
+ * Note: explicit instance attributes (componentProps) are intentionally not
+ * included here — this function computes the "canonical" values for propagation.
+ * During propagation, non-overridden props reset to these canonical values.
+ */
+export function resolveEffectiveAttributes(
+  schema: ComponentSchema,
+  variant?: string,
+  overrides?: Record<string, string | number | boolean>,
+): Record<string, string | number | boolean> {
+  const result: Record<string, string | number | boolean> = {};
+
+  // 1. Schema prop defaults
+  for (const prop of schema.props) {
+    if (prop.default !== undefined) {
+      result[prop.name] = prop.default;
+    }
+  }
+
+  // 2. Variant props (if variant specified)
+  if (variant) {
+    const variantDef = schema.variants.find(v => v.name === variant);
+    if (variantDef) {
+      for (const [key, value] of Object.entries(variantDef.props)) {
+        result[key] = value;
+      }
+    }
+  }
+
+  // 3. Overrides (highest priority)
+  if (overrides) {
+    for (const [key, value] of Object.entries(overrides)) {
+      result[key] = value;
+    }
+  }
+
+  return result;
+}
+
 // ---------------------------------------------------------------------------
 // Document-wide instantiation
 // ---------------------------------------------------------------------------

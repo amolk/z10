@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useEditor, type LayerNode } from "@/lib/editor-state";
+import { COMPONENT_COLOR } from "@/lib/editor-constants";
 import {
   Plus,
   Search,
@@ -31,10 +32,9 @@ export function LayersPanel() {
 
   return (
     <aside
-      className="flex w-[240px] flex-col border-r"
+      className="flex flex-1 flex-col overflow-hidden"
       style={{
         backgroundColor: "var(--ed-panel-bg)",
-        borderColor: "var(--ed-panel-border)",
       }}
     >
       {/* Pages header */}
@@ -707,7 +707,7 @@ function TypeIcon({ type, isSelected }: { type: LayerNode["type"]; isSelected: b
     case "text":
       return <Type {...props} />;
     case "component":
-      return <Diamond {...props} />;
+      return <Diamond {...props} style={{ ...props.style, color: isSelected ? props.style.color : COMPONENT_COLOR }} />;
     case "element":
       return <Box {...props} />;
   }

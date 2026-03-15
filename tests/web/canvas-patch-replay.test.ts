@@ -163,7 +163,7 @@ describe('canvas patch replay', () => {
         {
           op: 'add',
           parentId: 'card',
-          html: '<div data-z10-id="badge" data-z10-node="Frame"><span data-z10-id="badge-text">New</span></div>',
+          html: '<div data-z10-id="badge" style="display: flex;"><span data-z10-id="badge-text">New</span></div>',
           before: null,
         },
       ];

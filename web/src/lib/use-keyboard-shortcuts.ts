@@ -60,7 +60,8 @@ export function useKeyboardShortcuts() {
       return (
         el instanceof HTMLInputElement ||
         el instanceof HTMLTextAreaElement ||
-        el instanceof HTMLSelectElement
+        el instanceof HTMLSelectElement ||
+        (el instanceof HTMLElement && el.contentEditable === "true")
       );
     }
 

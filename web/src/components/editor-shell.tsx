@@ -11,11 +11,13 @@ import { useTransact } from "@/lib/use-transact";
 import { useEditBridge } from "@/lib/use-edit-bridge";
 import { ToolsToolbar } from "@/components/tools-toolbar";
 import { LayersPanel } from "@/components/layers-panel";
+import { AssetsPanel } from "@/components/assets-panel";
 import { EditorCanvas } from "@/components/editor-canvas";
 import { PropertiesPanel } from "@/components/properties-panel";
 import { ConnectAgentButton } from "@/components/connect-agent-button";
 import { useEditor } from "@/lib/editor-state";
 import { PanelLeft, PanelRight, Sun, Moon } from "lucide-react";
+import { useState } from "react";
 
 export function EditorShell({
   projectId,
@@ -55,6 +57,7 @@ function EditorShellInner({
     updateElementStyle,
     refreshLayersFromDOM,
     validateSelection,
+    undoSuppressRef,
     setOnStyleEdit,
     activePageId,
     leftPanelVisible,
@@ -79,6 +82,7 @@ function EditorShellInner({
     updateContent,
     refreshLayersFromDOM,
     validateSelection,
+    undoSuppressRef,
   );
 
   // D1+D4: Patch-based real-time connection with self-dedup
@@ -88,6 +92,8 @@ function EditorShellInner({
     handleResync,
     isOwnTx,
   );
+
+  const [leftTab, setLeftTab] = useState<"layers" | "assets">("layers");
 
   return (
     <div className="flex h-screen flex-col">
@@ -155,11 +161,50 @@ function EditorShellInner({
 
       {/* Editor body */}
       <div className="flex flex-1 overflow-hidden">
-        {leftPanelVisible && <LayersPanel />}
+        {leftPanelVisible && (
+          <div
+            className="flex flex-col border-r"
+            style={{
+              width: 260,
+              backgroundColor: "var(--ed-panel-bg)",
+              borderColor: "var(--ed-panel-border)",
+            }}
+          >
+            {/* Layers / Assets tab bar */}
+            <div
+              className="flex border-b text-[11px]"
+              style={{ borderColor: "var(--ed-panel-border)" }}
+            >
+              <button
+                onClick={() => setLeftTab("layers")}
+                className="flex-1 py-1.5 text-center transition-colors"
+                style={{
+                  color: leftTab === "layers" ? "var(--ed-text)" : "var(--ed-text-tertiary)",
+                  borderBottom: leftTab === "layers" ? "2px solid var(--ed-text)" : "2px solid transparent",
+                }}
+              >
+                Layers
+              </button>
+              <button
+                onClick={() => setLeftTab("assets")}
+                className="flex-1 py-1.5 text-center transition-colors"
+                style={{
+                  color: leftTab === "assets" ? "var(--ed-text)" : "var(--ed-text-tertiary)",
+                  borderBottom: leftTab === "assets" ? "2px solid var(--ed-text)" : "2px solid transparent",
+                }}
+              >
+                Assets
+              </button>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              {leftTab === "layers" ? <LayersPanel /> : <AssetsPanel />}
+            </div>
+          </div>
+        )}
         <ToolsToolbar />
 
         <div className="relative flex-1">
-          <EditorCanvas initialContent={initialContent} saveState={saveState} />
+          <EditorCanvas projectId={projectId} initialContent={initialContent} saveState={saveState} />
         </div>
 
         {rightPanelVisible && <PropertiesPanel />}

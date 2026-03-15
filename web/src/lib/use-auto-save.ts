@@ -64,6 +64,7 @@ export function useAutoSave(projectId: string, initialContent: string) {
   useEffect(() => {
     if (isExternalUpdate.current) {
       // Mark as saved (server already has this content) and reset flag
+      contentRef.current = content;
       lastSavedRef.current = content;
       isExternalUpdate.current = false;
       setSaveState("saved");
@@ -81,8 +82,9 @@ export function useAutoSave(projectId: string, initialContent: string) {
     if (!el) return;
 
     const observer = new MutationObserver(() => {
-      // Serialize current DOM state back to content
-      const serialized = serializeTransformLayer(el);
+      // Serialize current DOM state back to content, preserving the head
+      // (config, tokens, component definitions) from the current content.
+      const serialized = serializeTransformLayer(el, contentRef.current);
       if (serialized && serialized !== lastSavedRef.current) {
         debouncedSave(serialized);
       }
@@ -92,7 +94,7 @@ export function useAutoSave(projectId: string, initialContent: string) {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ["style", "data-z10-id", "data-z10-node", "data-z10-page"],
+      attributeFilter: ["style", "class", "data-z10-id", "data-z10-page"],
     });
 
     return () => observer.disconnect();
@@ -117,52 +119,35 @@ export function useAutoSave(projectId: string, initialContent: string) {
 /**
  * Serialize the transform layer's page elements back to .z10.html format.
  * This captures the live DOM state including any mutations from keyboard shortcuts.
+ *
+ * Strategy: extract body content from the live PageContent div, then splice it
+ * into the current saved content to preserve the head (config, tokens,
+ * component definitions).
  */
-function serializeTransformLayer(transformEl: HTMLElement): string | null {
-  // Find page containers (they have data-z10-id and are direct artboard wrappers)
-  const pageWrappers = transformEl.querySelectorAll("[data-z10-id]");
-  if (pageWrappers.length === 0) return null;
+function serializeTransformLayer(transformEl: HTMLElement, currentContent?: string): string | null {
+  // The canvas structure is:
+  //   transformRef > div[key=page] > [label div, PageContent div.rounded-sm.shadow-2xl]
+  // PageContent receives activePage.outerHTML, so its innerHTML IS the complete
+  // page div: <div data-z10-page="..." data-z10-id="page_1">...frames...</div>
+  const pageContentDiv = transformEl.querySelector(".rounded-sm.shadow-2xl") as HTMLElement | null;
+  if (!pageContentDiv) return null;
 
-  // We need to reconstruct the pages from the rendered DOM.
-  // Each page wrapper in the canvas has data-z10-id and contains the rendered innerHTML.
-  // We need to build back the page divs with their original attributes.
-  const pages: string[] = [];
+  const liveBody = pageContentDiv.innerHTML;
+  if (!liveBody.trim()) return null;
 
-  pageWrappers.forEach((wrapper) => {
-    const el = wrapper as HTMLElement;
-    // Only process top-level page elements (children of transform layer)
-    if (el.parentElement !== transformEl) return;
+  if (!currentContent) return liveBody;
 
-    const pageId = el.getAttribute("data-z10-id") || "";
-    // Find page name from the label sibling or the original data
-    const labelEl = el.querySelector(":scope > div[class*='-top-']");
-    const pageName = labelEl?.textContent?.trim() || "Page 1";
+  // Splice: replace everything from the first <div data-z10-page= through
+  // </body></html> (or end) with the live body, preserving the head
+  // (config, tokens, component definitions).
+  const firstPageIdx = currentContent.indexOf("<div data-z10-page=");
+  if (firstPageIdx < 0) return liveBody;
 
-    // Get the actual content div (the one with dangerouslySetInnerHTML content)
-    const contentDivs = el.querySelectorAll(":scope > div:not([class*='-top-'])");
-    let innerHTML = "";
-    contentDivs.forEach((div) => {
-      innerHTML += div.innerHTML;
-    });
+  const head = currentContent.slice(0, firstPageIdx);
 
-    // Get dimensions from style
-    const style = el.getAttribute("style") || "";
-    const widthMatch = style.match(/width:\s*(\d+)/);
-    const heightMatch = style.match(/(?:min-)?height:\s*(\d+)/);
-    const bgMatch = style.match(/background:\s*([^;]+)/);
+  // Preserve any closing tags after the page content (</body></html>)
+  const bodyCloseIdx = currentContent.indexOf("</body>");
+  const tail = bodyCloseIdx >= 0 ? currentContent.slice(bodyCloseIdx) : "";
 
-    const width = widthMatch ? widthMatch[1] : "1440";
-    const height = heightMatch ? heightMatch[1] : "900";
-    const bg = bgMatch ? bgMatch[1].trim() : "#ffffff";
-
-    pages.push(
-      `  <div data-z10-page="${pageName}" data-z10-id="${pageId}" style="width: ${width}px; min-height: ${height}px; background: ${bg}; position: relative;">\n${innerHTML}\n  </div>`
-    );
-  });
-
-  if (pages.length === 0) return null;
-
-  // Reconstruct minimal .z10.html
-  // Note: we preserve just the page content since config/tokens are not in the canvas DOM
-  return pages.join("\n");
+  return head + liveBody + "\n" + tail;
 }

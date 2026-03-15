@@ -29,6 +29,13 @@ const TOOLS: { id: ToolType; label: string; shortcut: string; icon: React.ReactN
     shortcut: "T",
     icon: <Type size={20} strokeWidth={1} />,
   },
+  // Component tool (K) — disabled until createComponentFromSelection is implemented
+  // {
+  //   id: "component",
+  //   label: "Create Component",
+  //   shortcut: "K",
+  //   icon: <Diamond size={20} strokeWidth={1} />,
+  // },
 ];
 
 export function ToolsToolbar() {
@@ -40,7 +47,8 @@ export function ToolsToolbar() {
       if (
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement ||
-        e.target instanceof HTMLSelectElement
+        e.target instanceof HTMLSelectElement ||
+        (e.target instanceof HTMLElement && e.target.contentEditable === "true")
       )
         return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;

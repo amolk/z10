@@ -83,17 +83,67 @@ export async function cmdExec(args: string[]): Promise<void> {
     console.log(`✓ Executed (txId: ${result.txId})`);
     console.log(dom.html);
   } else {
-    // Print rejection details
-    console.error('✗ Execution rejected');
-    if (result.conflicts && (result.conflicts as unknown[]).length > 0) {
-      for (const conflict of result.conflicts) {
-        console.error(`  Conflict: ${JSON.stringify(conflict)}`);
-      }
+    // Print structured rejection details with actionable guidance
+    const reason = result.reason ?? 'unknown';
+    console.error(`✗ Execution rejected [${reason}]`);
+    console.error('');
+
+    switch (reason) {
+      case 'execution-error':
+        console.error('  Your JavaScript threw an error or timed out during execution.');
+        if (result.error) {
+          console.error(`  Error: ${result.error}`);
+        }
+        console.error('');
+        console.error('  Hints:');
+        console.error('    - Check for syntax errors in your code');
+        console.error('    - Ensure you are querying elements that exist in the DOM');
+        console.error('    - Use document.querySelector() / document.querySelectorAll() to find elements');
+        console.error('    - Run `z10 dom` to inspect the current DOM state');
+        break;
+
+      case 'illegal-modification':
+        console.error('  Your code modified protected system attributes (data-z10-id or data-z10-ts-*).');
+        if (result.error) {
+          console.error(`  Detail: ${result.error}`);
+        }
+        console.error('');
+        console.error('  Hints:');
+        console.error('    - Do NOT set or remove data-z10-id or data-z10-ts-* attributes');
+        console.error('    - These are managed internally by the z10 transaction engine');
+        break;
+
+      case 'conflict':
+        console.error('  The DOM was modified by another transaction since your last read.');
+        if (result.conflicts && (result.conflicts as unknown[]).length > 0) {
+          for (const conflict of result.conflicts) {
+            console.error(`  Conflict: ${JSON.stringify(conflict)}`);
+          }
+        }
+        console.error('');
+        console.error('  Hints:');
+        console.error('    - Re-fetch the DOM with `z10 dom` and retry your operation');
+        console.error('    - This is usually transient — retrying should succeed');
+        break;
+
+      case 'lock-timeout':
+        console.error('  Could not acquire a lock on the target subtree (another transaction is in progress).');
+        console.error('');
+        console.error('  Hints:');
+        console.error('    - Wait a moment and retry');
+        console.error('    - Ensure no other z10 exec calls are running concurrently on the same subtree');
+        break;
+
+      default:
+        if (result.error) {
+          console.error(`  Error: ${result.error}`);
+        }
+        break;
     }
-    if (result.error) {
-      console.error(`  Error: ${result.error}`);
-    }
+
     if (result.freshHtml) {
+      console.error('');
+      console.error('  Current DOM state:');
       console.log(result.freshHtml);
     }
     process.exit(1);

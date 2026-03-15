@@ -64,15 +64,19 @@ export interface ComponentVariant {
   styles?: Record<string, string>;
 }
 
-/** Component definition schema */
+/** Component definition schema (Web Components-based) */
 export interface ComponentSchema {
-  name: string;
+  name: string;                  // PascalCase: "MetricCard"
+  tagName: string;               // kebab-case: "z10-metric-card"
   description?: string;
+  category?: string;             // Assets panel grouping
   props: ComponentProp[];
   variants: ComponentVariant[];
-  slots?: string[];
-  styles: string;       // CSS text for the component
-  template: string;     // HTML template string
+  slots?: string[];              // named slots
+  template: string;              // HTML inside <template> (excluding <style>)
+  styles: string;                // CSS inside <template><style>
+  classBody: string;             // JS class body for the custom element
+  mainNodeId?: NodeId;           // main component node on canvas
 }
 
 // ---------------------------------------------------------------------------
@@ -94,8 +98,11 @@ export interface Z10Node {
   intent: NodeIntent;
   editor: NodeEditor;
   agentEditable: AgentEditable;
-  componentName?: string;     // if this is a component instance
-  componentProps?: Record<string, string | number | boolean>;
+  componentName?: string;     // if this is a component instance (legacy)
+  componentProps?: Record<string, string | number | boolean>; // legacy
+  componentDef?: string;       // marks this as main component definition (PascalCase name)
+  componentOverrides?: Record<string, string | number | boolean>;
+  componentVariant?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,5 +142,42 @@ export interface Z10Document {
   components: Map<string, ComponentSchema>;
   nodes: Map<NodeId, Z10Node>;
   pages: Z10Page[];
+}
+
+// ---------------------------------------------------------------------------
+// Component Naming Helpers
+// ---------------------------------------------------------------------------
+
+/** Convert PascalCase name to kebab-case tag name: "MetricCard" → "z10-metric-card" */
+export function toTagName(name: string): string {
+  const kebab = name
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .replace(/([A-Z])([A-Z][a-z])/g, '$1-$2')
+    .toLowerCase();
+  return `z10-${kebab}`;
+}
+
+/** Convert PascalCase name to class name: "MetricCard" → "Z10MetricCard" */
+export function toClassName(name: string): string {
+  return `Z10${name}`;
+}
+
+/**
+ * Convert tag name back to PascalCase: "z10-metric-card" → "MetricCard".
+ * NOTE: This is lossy for acronyms (e.g. "z10-http-client" → "HttpClient", not "HTTPClient").
+ * Prefer reading the component name from `data-z10-component` or schema lookup when available.
+ */
+export function tagNameToComponentName(tagName: string): string | null {
+  if (!tagName.startsWith('z10-')) return null;
+  const rest = tagName.slice(4); // strip "z10-"
+  return rest
+    .split('-')
+    .map(s => s.charAt(0).toUpperCase() + s.slice(1))
+    .join('');
+}
+
+/** Check if a tag name is a z10 custom element */
+export function isZ10CustomElement(tagName: string): boolean {
+  return tagName.startsWith('z10-');
 }
 
