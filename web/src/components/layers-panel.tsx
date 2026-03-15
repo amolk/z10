@@ -342,6 +342,7 @@ function LayerRow({ node }: { node: LayerNode }) {
     transformRef,
     content,
     updateContent,
+    setHoveredLayerId,
   } = useEditor();
 
   const rowRef = useRef<HTMLDivElement>(null);
@@ -591,6 +592,8 @@ function LayerRow({ node }: { node: LayerNode }) {
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
+        onMouseEnter={() => setHoveredLayerId(node.id)}
+        onMouseLeave={() => setHoveredLayerId(null)}
         className="group flex items-center gap-1.5 rounded-sm py-1 text-[12px]"
         style={{
           paddingLeft: (node.depth - 1) * 14 + 12,

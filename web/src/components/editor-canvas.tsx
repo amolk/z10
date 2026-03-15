@@ -12,6 +12,10 @@ import { useEditor } from "@/lib/editor-state";
 import { isContainer, isTextEditable } from "@/lib/node-inference";
 import { SELECTION_COLOR, COMPONENT_COLOR } from "@/lib/editor-constants";
 import { tagNameToComponentName } from "z10/core";
+import {
+  expandComponentTemplates,
+  parseComponentTemplates,
+} from "@/lib/z10-dom";
 
 type ViewTransform = {
   x: number;
@@ -73,7 +77,7 @@ export function EditorCanvas({
   initialContent: string;
   saveState?: "saved" | "saving" | "unsaved";
 }) {
-  const { selectedIds, select, clearSelection, transformRef, activeTool, setActiveTool, content, updateElementStyle, updateContent, activePageId, editingTextId, startTextEdit, commitTextEdit } = useEditor();
+  const { selectedIds, select, clearSelection, transformRef, activeTool, setActiveTool, content, updateElementStyle, updateContent, activePageId, editingTextId, startTextEdit, commitTextEdit, hoveredLayerId, setHoveredLayerId } = useEditor();
 
   // ─── Canvas pan/zoom state ─────────────────────────────────
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -91,11 +95,13 @@ export function EditorCanvas({
 
   // ─── Parse active page from .z10.html ──────────────────────
   const [activePage, setActivePage] = useState<PageInfo | null>(null);
+  const componentTemplatesRef = useRef(new Map<string, { template: string; styles: string }>());
   useEffect(() => {
     const src = content || initialContent;
     const parsed = parsePagesFromContent(src);
     const page = parsed.find((p) => p.id === activePageId) || parsed[0] || null;
     setActivePage(page);
+    componentTemplatesRef.current = parseComponentTemplates(src);
   }, [content, initialContent, activePageId]);
 
   // ─── Selection rects (computed from DOM) ────────────────────
@@ -335,6 +341,9 @@ export function EditorCanvas({
   // ─── Hover tracking ──────────────────────────────────────────
   const handleMouseMove = useCallback(
     (e: React.MouseEvent) => {
+      // Clear any layer-panel hover when the user is mousing over the canvas
+      if (hoveredLayerId) setHoveredLayerId(null);
+
       if (dragMode.type !== "none" || spaceHeld || activeTool === "hand") {
         setHoveredId(null);
         setHoverRect(null);
@@ -383,7 +392,7 @@ export function EditorCanvas({
         setHoverChildRects([]);
       }
     },
-    [dragMode.type, spaceHeld, activeTool, selectedIds, computeElementRect, transformRef]
+    [dragMode.type, spaceHeld, activeTool, selectedIds, computeElementRect, transformRef, hoveredLayerId, setHoveredLayerId]
   );
 
   const handleMouseLeave = useCallback(() => {
@@ -391,6 +400,75 @@ export function EditorCanvas({
     setHoverRect(null);
     setHoverChildRects([]);
   }, []);
+
+  // ─── Hover from layers panel ───────────────────────────────
+  // When hoveredLayerId is set from the layers panel, compute the rect
+  // to show the hover overlay and pan to bring the element into view.
+  useEffect(() => {
+    if (!hoveredLayerId) {
+      setHoveredId(null);
+      setHoverRect(null);
+      setHoverChildRects([]);
+      return;
+    }
+
+    // Skip if already selected (selection overlay takes precedence)
+    if (selectedIds.has(hoveredLayerId)) return;
+
+    setHoveredId(hoveredLayerId);
+    const rect = computeElementRect(hoveredLayerId);
+    if (!rect) return;
+
+    setHoverRect(rect);
+
+    // Compute child rects
+    const transformEl = transformRef.current;
+    if (transformEl) {
+      const parentEl = transformEl.querySelector(`[data-z10-id="${hoveredLayerId}"]`);
+      if (parentEl) {
+        const childRects: Rect[] = [];
+        for (const child of Array.from(parentEl.children)) {
+          const childId = child.getAttribute("data-z10-id");
+          if (childId) {
+            const cr = computeElementRect(childId);
+            if (cr) childRects.push(cr);
+          }
+        }
+        setHoverChildRects(childRects);
+      }
+    }
+
+    // Pan to bring element into view if it's off-screen
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const canvasRect = canvas.getBoundingClientRect();
+    const margin = 60; // px margin from edge
+
+    // Element position in screen coordinates
+    const elScreenLeft = rect.x * view.scale + view.x;
+    const elScreenTop = rect.y * view.scale + view.y;
+    const elScreenRight = (rect.x + rect.w) * view.scale + view.x;
+    const elScreenBottom = (rect.y + rect.h) * view.scale + view.y;
+
+    let dx = 0;
+    let dy = 0;
+
+    if (elScreenRight < margin) {
+      dx = margin - elScreenLeft;
+    } else if (elScreenLeft > canvasRect.width - margin) {
+      dx = canvasRect.width - margin - elScreenRight;
+    }
+
+    if (elScreenBottom < margin) {
+      dy = margin - elScreenTop;
+    } else if (elScreenTop > canvasRect.height - margin) {
+      dy = canvasRect.height - margin - elScreenBottom;
+    }
+
+    if (dx !== 0 || dy !== 0) {
+      setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));
+    }
+  }, [hoveredLayerId]); // eslint-disable-line react-hooks/exhaustive-deps -- intentionally only react to hoveredLayerId changes
 
   // ─── Find z10 element at click ────────────────────────────────
   const findZ10Id = useCallback(
@@ -1518,7 +1596,7 @@ export function EditorCanvas({
                 {activePage.name}
               </div>
               {/* Full page HTML — memoized to prevent DOM replacement during interactions */}
-              <PageContent html={activePage.outerHTML} />
+              <PageContent html={activePage.outerHTML} componentTemplates={componentTemplatesRef.current} />
             </div>
           ) : (
             <div
@@ -1857,12 +1935,22 @@ function SelectionOverlay({
  * is mutated directly by replayPatch (A15). React does not own this DOM content.
  * On page switch, key={activePage.id} on the parent causes unmount/remount,
  * so innerHTML is re-set from the new page's HTML.
+ *
+ * Also expands component templates: instances with data-z10-component +
+ * data-z10-props get their templates filled in for visual rendering.
  */
-const PageContent = memo(function PageContent({ html }: { html: string }) {
+const PageContent = memo(function PageContent({
+  html,
+  componentTemplates,
+}: {
+  html: string;
+  componentTemplates: Map<string, { template: string; styles: string }>;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (ref.current) {
       ref.current.innerHTML = html;
+      expandComponentTemplates(ref.current, componentTemplates);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally mount-only; patches handle subsequent updates
   }, []);

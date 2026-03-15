@@ -18,7 +18,11 @@
  */
 
 import { useCallback, type RefObject } from "react";
-import { replayPatch, type PatchEnvelope } from "@/lib/z10-dom";
+import {
+  replayPatch,
+  expandComponentTemplates,
+  type PatchEnvelope,
+} from "@/lib/z10-dom";
 
 /**
  * Creates patch and resync handlers that replay against the canvas DOM.
@@ -28,6 +32,7 @@ import { replayPatch, type PatchEnvelope } from "@/lib/z10-dom";
  * @param refreshLayers - Callback to refresh the layers panel from live DOM after mutations
  * @param validateSelection - D5: Remove selected IDs that no longer exist in live DOM
  * @param undoSuppressRef - Ref flag to suppress undo snapshot recording during patch replay
+ * @param componentTemplatesRef - Ref to parsed component templates for expanding instances
  */
 export function useCanvasPatchReplay(
   transformRef: RefObject<HTMLDivElement | null>,
@@ -35,6 +40,7 @@ export function useCanvasPatchReplay(
   refreshLayers?: () => void,
   validateSelection?: () => void,
   undoSuppressRef?: RefObject<boolean>,
+  componentTemplatesRef?: RefObject<Map<string, { template: string; styles: string }>>,
 ) {
   const handlePatch = useCallback(
     (patch: PatchEnvelope) => {
@@ -46,6 +52,11 @@ export function useCanvasPatchReplay(
 
       // Apply ops directly to the live browser DOM
       replayPatch(patch.ops, root);
+
+      // Expand component templates for any new instances added by the patch
+      if (componentTemplatesRef?.current) {
+        expandComponentTemplates(root as HTMLElement, componentTemplatesRef.current);
+      }
 
       // D3: Refresh layers panel from live DOM to reflect changes
       refreshLayers?.();
@@ -73,6 +84,10 @@ export function useCanvasPatchReplay(
           if (undoSuppressRef) undoSuppressRef.current = true;
 
           pageContainer.innerHTML = html;
+          // Expand component templates after full resync
+          if (componentTemplatesRef?.current) {
+            expandComponentTemplates(pageContainer as HTMLElement, componentTemplatesRef.current);
+          }
           refreshLayers?.();
           validateSelection?.();
 

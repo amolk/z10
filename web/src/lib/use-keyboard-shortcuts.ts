@@ -37,6 +37,7 @@ export function useKeyboardShortcuts() {
     updateElementStyle,
     content,
     groupIntoFrame,
+    refreshLayersFromDOM,
   } = useEditor();
 
   // Get all selectable element IDs on the active page
@@ -86,6 +87,7 @@ export function useKeyboardShortcuts() {
           if (el) el.remove();
         }
         clearSelection();
+        refreshLayersFromDOM();
         return;
       }
 

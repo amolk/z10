@@ -147,6 +147,10 @@ export type EditorState = {
   deletePage: (pageId: string) => void;
   duplicatePage: (pageId: string) => void;
   reorderPages: (fromIndex: number, toIndex: number) => void;
+
+  // Hover from layers panel → canvas highlight
+  hoveredLayerId: string | null;
+  setHoveredLayerId: (id: string | null) => void;
 };
 
 // ─── Context ────────────────────────────────────────────────
@@ -190,6 +194,7 @@ export function EditorProvider({
 
   const [editingComponentName, setEditingComponentName] = useState<string | null>(null);
   const [componentList, setComponentList] = useState<string[]>([]);
+  const [hoveredLayerId, setHoveredLayerId] = useState<string | null>(null);
 
   const enterComponentEditMode = useCallback((name: string) => {
     setEditingComponentName(name);
@@ -203,15 +208,32 @@ export function EditorProvider({
     console.warn('createComponentFromSelection is not yet implemented. Use `z10 component create` via CLI.');
   }, []);
 
-  // Parse component list from content — match only component-meta script blocks
+  // Parse component list from content — match both new-format (component-meta)
+  // and old-format (component) script blocks
   useEffect(() => {
     if (!content) return;
-    const re = /<script\s+(?=[^>]*data-z10-role="component-meta")(?=[^>]*data-z10-component="([^"]*)")[^>]*>/g;
     const names = new Set<string>();
+
+    // New format: <script ... data-z10-role="component-meta" data-z10-component="Name">
+    const newRe = /<script\s+(?=[^>]*data-z10-role="component-meta")(?=[^>]*data-z10-component="([^"]*)")[^>]*>/g;
     let m: RegExpExecArray | null;
-    while ((m = re.exec(content)) !== null) {
+    while ((m = newRe.exec(content)) !== null) {
       names.add(m[1]!);
     }
+
+    // Old format: <script type="application/z10+json" data-z10-role="component"> { "name": "..." } </script>
+    const oldRe = /<script\s+type="application\/z10\+json"\s+data-z10-role="component"\s*>([\s\S]*?)<\/script>/g;
+    while ((m = oldRe.exec(content)) !== null) {
+      try {
+        const raw = JSON.parse(m[1]!.trim()) as Record<string, unknown>;
+        if (typeof raw["name"] === "string" && raw["name"]) {
+          names.add(raw["name"]);
+        }
+      } catch {
+        // Skip malformed blocks
+      }
+    }
+
     setComponentList(Array.from(names));
   }, [content]);
 
@@ -601,6 +623,8 @@ export function EditorProvider({
         deletePage,
         duplicatePage,
         reorderPages,
+        hoveredLayerId,
+        setHoveredLayerId,
       }}
     >
       {children}

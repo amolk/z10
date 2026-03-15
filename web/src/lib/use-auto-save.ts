@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useEditor } from "@/lib/editor-state";
+import { serializeWithCollapsedInstances } from "@/lib/z10-dom";
 
 const SAVE_DEBOUNCE_MS = 1500;
 
@@ -132,7 +133,9 @@ function serializeTransformLayer(transformEl: HTMLElement, currentContent?: stri
   const pageContentDiv = transformEl.querySelector(".rounded-sm.shadow-2xl") as HTMLElement | null;
   if (!pageContentDiv) return null;
 
-  const liveBody = pageContentDiv.innerHTML;
+  // Collapse expanded component instances before serializing so we don't
+  // persist template-expanded content (instances should remain empty in storage).
+  const liveBody = serializeWithCollapsedInstances(pageContentDiv);
   if (!liveBody.trim()) return null;
 
   if (!currentContent) return liveBody;

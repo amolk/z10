@@ -17,7 +17,8 @@ import { PropertiesPanel } from "@/components/properties-panel";
 import { ConnectAgentButton } from "@/components/connect-agent-button";
 import { useEditor } from "@/lib/editor-state";
 import { PanelLeft, PanelRight, Sun, Moon } from "lucide-react";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
+import { parseComponentTemplates } from "@/lib/z10-dom";
 
 export function EditorShell({
   projectId,
@@ -52,6 +53,7 @@ function EditorShellInner({
   useUndoRedo();
   const { saveState } = useAutoSave(projectId, initialContent);
   const {
+    content,
     transformRef,
     updateContent,
     updateElementStyle,
@@ -68,6 +70,15 @@ function EditorShellInner({
     toggleDarkMode,
   } = useEditor();
 
+  // Parse component templates from content for template expansion.
+  // Re-parse when content changes (e.g., agent creates new components).
+  const componentTemplatesRef = useRef(parseComponentTemplates(initialContent));
+  useEffect(() => {
+    if (content) {
+      componentTemplatesRef.current = parseComponentTemplates(content);
+    }
+  }, [content]);
+
   // D4: Server transaction hook — sends human edits to POST /transact
   const { transact, isOwnTx } = useTransact(projectId);
 
@@ -83,6 +94,7 @@ function EditorShellInner({
     refreshLayersFromDOM,
     validateSelection,
     undoSuppressRef,
+    componentTemplatesRef,
   );
 
   // D1+D4: Patch-based real-time connection with self-dedup
@@ -163,7 +175,7 @@ function EditorShellInner({
       <div className="flex flex-1 overflow-hidden">
         {leftPanelVisible && (
           <div
-            className="flex flex-col border-r"
+            className="flex min-h-0 flex-col border-r"
             style={{
               width: 260,
               backgroundColor: "var(--ed-panel-bg)",
@@ -196,7 +208,7 @@ function EditorShellInner({
                 Assets
               </button>
             </div>
-            <div className="flex-1 overflow-hidden">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
               {leftTab === "layers" ? <LayersPanel /> : <AssetsPanel />}
             </div>
           </div>
