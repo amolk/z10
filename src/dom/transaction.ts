@@ -16,7 +16,7 @@
 import { LamportClock } from './clock.js';
 import { SubtreeLockManager } from './locks.js';
 import { createSandboxContext, executeSandboxCode } from './sandbox.js';
-import { checkIllegalModifications } from './checks.js';
+import { checkIllegalModifications, checkPageStructureIntegrity } from './checks.js';
 import { buildWriteSet } from './write-set.js';
 import { validate, preCheckTreeTimestamp, buildManifest, type TimestampManifest, type Conflict } from './validator.js';
 import { bumpTimestamps, bubbleTimestamp, getTimestamp, type WriteSetEntry } from './timestamps.js';
@@ -186,6 +186,19 @@ export class TransactionEngine {
         reason: 'illegal-modification',
         error: new Error(
           `Illegal modification of system attributes: ${illegalMods.map((m) => m.attributeName).join(', ')}`,
+        ),
+      };
+    }
+
+    // Step 7b: Check structural integrity — page wrappers must not be destroyed
+    const structuralViolations = checkPageStructureIntegrity(subtreeRoot, sandboxClone);
+    if (structuralViolations.length > 0) {
+      return {
+        status: 'rejected',
+        reason: 'illegal-modification',
+        error: new Error(
+          `Page structure destroyed: agent code removed all data-z10-page elements. ` +
+          `Agent must work within page elements, not replace them.`,
         ),
       };
     }

@@ -1,12 +1,13 @@
 /**
  * A8. Illegal modification check.
  * Scan MutationRecords for any change to data-z10-id or data-z10-ts-* attributes.
+ * Also checks structural integrity (page wrappers must not be destroyed).
  * Reject transaction if found.
  * §5.2 Step 7
  */
 
 export interface IllegalModification {
-  type: 'id-modified' | 'timestamp-modified';
+  type: 'id-modified' | 'timestamp-modified' | 'page-structure-destroyed';
   nodeId: string | null;
   attributeName: string;
 }
@@ -37,7 +38,39 @@ export function checkIllegalModifications(records: MutationRecord[]): IllegalMod
         nodeId: nid,
         attributeName: attr,
       });
+    } else if (attr === 'data-z10-page') {
+      violations.push({
+        type: 'page-structure-destroyed',
+        nodeId: nid,
+        attributeName: attr,
+      });
     }
+  }
+
+  return violations;
+}
+
+/**
+ * Check that page structure is preserved after sandbox execution.
+ * If the original subtree had data-z10-page elements, the sandbox result must too.
+ * Prevents agents from wiping out page wrappers via body.innerHTML or similar.
+ */
+export function checkPageStructureIntegrity(
+  originalRoot: Element,
+  sandboxRoot: Element,
+): IllegalModification[] {
+  const violations: IllegalModification[] = [];
+
+  const originalPages = originalRoot.querySelectorAll('[data-z10-page]');
+  if (originalPages.length === 0) return violations; // no pages to protect
+
+  const sandboxPages = sandboxRoot.querySelectorAll('[data-z10-page]');
+  if (sandboxPages.length === 0) {
+    violations.push({
+      type: 'page-structure-destroyed',
+      nodeId: null,
+      attributeName: 'data-z10-page',
+    });
   }
 
   return violations;
