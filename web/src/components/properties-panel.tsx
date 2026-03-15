@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useEditor, getElementStyles, type ElementStyles } from "@/lib/editor-state";
 import { ColorPicker } from "@/components/color-picker";
 import { ScrubInput } from "@/components/scrub-input";
+import { COMPONENT_COLOR } from "@/lib/editor-constants";
 import {
   Plus,
   Minus,
@@ -30,19 +31,28 @@ import {
   FlipVertical,
   Download,
   Search,
+  Diamond,
+  Unplug,
 } from "lucide-react";
 
 // ─── Main Panel ──────────────────────────────────────────────
 
 export function PropertiesPanel() {
-  const { selectedIds, transformRef, updateElementStyle, activePageId, content, updateContent } = useEditor();
+  const {
+    selectedIds, transformRef, updateElementStyle, activePageId, content, updateContent,
+    componentSchemas, updateInstanceProps, detachInstance, enterComponentEditMode,
+  } = useEditor();
   const [styles, setStyles] = useState<ElementStyles | null>(null);
   const [elementTag, setElementTag] = useState("");
+  const [componentName, setComponentName] = useState<string | null>(null);
+  const [instanceProps, setInstanceProps] = useState<Record<string, unknown>>({});
 
   const refreshStyles = useCallback(() => {
     if (selectedIds.size !== 1) {
       setStyles(null);
       setElementTag("");
+      setComponentName(null);
+      setInstanceProps({});
       return;
     }
     const id = Array.from(selectedIds)[0];
@@ -50,6 +60,18 @@ export function PropertiesPanel() {
     if (!el) { setStyles(null); return; }
     setElementTag(el.tagName.toLowerCase());
     setStyles(getElementStyles(el));
+    // Detect component instance
+    const compName = el.getAttribute("data-z10-component");
+    setComponentName(compName);
+    if (compName) {
+      try {
+        setInstanceProps(JSON.parse(el.getAttribute("data-z10-props") || "{}"));
+      } catch {
+        setInstanceProps({});
+      }
+    } else {
+      setInstanceProps({});
+    }
   }, [selectedIds, transformRef]);
 
   useEffect(() => {
@@ -112,6 +134,18 @@ export function PropertiesPanel() {
 
   return (
     <Panel tag={elementTag} elementId={selectedId ?? undefined}>
+      {componentName && selectedId && (
+        <ComponentInstanceSection
+          componentName={componentName}
+          instanceProps={instanceProps}
+          schema={componentSchemas.get(componentName) ?? null}
+          elementId={selectedId}
+          updateInstanceProps={updateInstanceProps}
+          detachInstance={detachInstance}
+          enterComponentEditMode={enterComponentEditMode}
+          refreshStyles={refreshStyles}
+        />
+      )}
       {styles && <LayoutSection styles={styles} updateStyle={updateStyle} />}
       {styles && <FrameSection styles={styles} updateStyle={updateStyle} />}
       {styles && <AppearanceSection styles={styles} updateStyle={updateStyle} />}
@@ -163,6 +197,206 @@ function Panel({ tag, elementId, children }: { tag: string; elementId?: string; 
       </div>
     </aside>
   );
+}
+
+// ─── Component instance section ─────────────────────────────
+
+function ComponentInstanceSection({
+  componentName,
+  instanceProps,
+  schema,
+  elementId,
+  updateInstanceProps,
+  detachInstance,
+  enterComponentEditMode,
+  refreshStyles,
+}: {
+  componentName: string;
+  instanceProps: Record<string, unknown>;
+  schema: import("@/lib/editor-state").EditorComponentSchema | null;
+  elementId: string;
+  updateInstanceProps: (id: string, props: Record<string, unknown>) => void;
+  detachInstance: (id: string) => void;
+  enterComponentEditMode: (name: string) => void;
+  refreshStyles: () => void;
+}) {
+  const handlePropChange = useCallback(
+    (propName: string, value: unknown) => {
+      const next = { ...instanceProps, [propName]: value };
+      updateInstanceProps(elementId, next);
+      setTimeout(refreshStyles, 50);
+    },
+    [instanceProps, elementId, updateInstanceProps, refreshStyles],
+  );
+
+  const handleDetach = useCallback(() => {
+    detachInstance(elementId);
+    setTimeout(refreshStyles, 50);
+  }, [elementId, detachInstance, refreshStyles]);
+
+  return (
+    <div className="border-b px-3 py-2" style={{ borderColor: "var(--ed-section-border)" }}>
+      {/* Component header */}
+      <div className="flex items-center gap-1.5 mb-2">
+        <Diamond size={14} strokeWidth={1.5} style={{ color: COMPONENT_COLOR, flexShrink: 0 }} />
+        <span className="text-[12px] font-medium" style={{ color: COMPONENT_COLOR }}>
+          {componentName}
+        </span>
+      </div>
+
+      {/* Variant selector */}
+      {schema && schema.variants.length > 0 && (
+        <div className="mb-2">
+          <label className="mb-1 block text-[10px]" style={{ color: "var(--ed-text-tertiary)" }}>
+            Variant
+          </label>
+          <select
+            className="w-full rounded px-2 py-1 text-[12px] outline-none"
+            style={{
+              backgroundColor: "var(--ed-input-bg)",
+              color: "var(--ed-text)",
+              border: "1px solid var(--ed-panel-border)",
+            }}
+            value={findMatchingVariant(schema.variants, instanceProps) ?? "__custom__"}
+            onChange={(e) => {
+              const variant = schema.variants.find((v) => v.name === e.target.value);
+              if (variant) {
+                const next = { ...instanceProps, ...variant.props };
+                updateInstanceProps(elementId, next);
+                setTimeout(refreshStyles, 50);
+              }
+            }}
+          >
+            {schema.variants.map((v) => (
+              <option key={v.name} value={v.name}>{v.name}</option>
+            ))}
+            {findMatchingVariant(schema.variants, instanceProps) === null && (
+              <option value="__custom__">Custom</option>
+            )}
+          </select>
+        </div>
+      )}
+
+      {/* Prop editors */}
+      {schema && schema.props.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          {schema.props.map((prop) => (
+            <PropEditor
+              key={prop.name}
+              prop={prop}
+              value={instanceProps[prop.name]}
+              onChange={(v) => handlePropChange(prop.name, v)}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Actions */}
+      <div className="mt-2 flex gap-1">
+        <button
+          onClick={() => enterComponentEditMode(componentName)}
+          className="flex flex-1 items-center justify-center gap-1 rounded px-2 py-1 text-[11px] transition-colors hover:bg-[var(--ed-hover-bg)]"
+          style={{ color: "var(--ed-text-secondary)", border: "1px solid var(--ed-panel-border)" }}
+          title="Edit component definition"
+        >
+          <Diamond size={10} strokeWidth={1.5} />
+          Edit Component
+        </button>
+        <button
+          onClick={handleDetach}
+          className="flex items-center justify-center gap-1 rounded px-2 py-1 text-[11px] transition-colors hover:bg-[var(--ed-hover-bg)]"
+          style={{ color: "var(--ed-text-secondary)", border: "1px solid var(--ed-panel-border)" }}
+          title="Detach instance from component"
+        >
+          <Unplug size={10} strokeWidth={1.5} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PropEditor({
+  prop,
+  value,
+  onChange,
+}: {
+  prop: import("z10/core").ComponentProp;
+  value: unknown;
+  onChange: (v: unknown) => void;
+}) {
+  const strValue = value !== undefined ? String(value) : String(prop.default ?? "");
+
+  return (
+    <div className="flex items-center gap-2">
+      <label
+        className="w-[70px] flex-shrink-0 truncate text-[11px]"
+        style={{ color: "var(--ed-text-secondary)" }}
+        title={prop.description || prop.name}
+      >
+        {prop.name}
+      </label>
+      {prop.type === "enum" && prop.options ? (
+        <select
+          className="flex-1 rounded px-1.5 py-0.5 text-[11px] outline-none"
+          style={{
+            backgroundColor: "var(--ed-input-bg)",
+            color: "var(--ed-text)",
+            border: "1px solid var(--ed-panel-border)",
+          }}
+          value={strValue}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          {prop.options.map((opt) => (
+            <option key={opt} value={opt}>{opt}</option>
+          ))}
+        </select>
+      ) : prop.type === "boolean" ? (
+        <input
+          type="checkbox"
+          checked={value === true || value === "true"}
+          onChange={(e) => onChange(e.target.checked)}
+          className="accent-[var(--ed-text)]"
+        />
+      ) : prop.type === "number" ? (
+        <input
+          type="number"
+          className="flex-1 rounded px-1.5 py-0.5 text-[11px] outline-none"
+          style={{
+            backgroundColor: "var(--ed-input-bg)",
+            color: "var(--ed-text)",
+            border: "1px solid var(--ed-panel-border)",
+          }}
+          value={strValue}
+          onChange={(e) => onChange(Number(e.target.value))}
+        />
+      ) : (
+        <input
+          type="text"
+          className="flex-1 rounded px-1.5 py-0.5 text-[11px] outline-none"
+          style={{
+            backgroundColor: "var(--ed-input-bg)",
+            color: "var(--ed-text)",
+            border: "1px solid var(--ed-panel-border)",
+          }}
+          value={strValue}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )}
+    </div>
+  );
+}
+
+function findMatchingVariant(
+  variants: import("z10/core").ComponentVariant[],
+  props: Record<string, unknown>,
+): string | null {
+  for (const v of variants) {
+    const allMatch = Object.entries(v.props).every(
+      ([key, val]) => String(props[key]) === String(val),
+    );
+    if (allMatch) return v.name;
+  }
+  return null;
 }
 
 // ─── Page properties (shown when nothing selected) ──────────

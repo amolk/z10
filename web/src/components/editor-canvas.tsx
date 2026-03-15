@@ -77,7 +77,7 @@ export function EditorCanvas({
   initialContent: string;
   saveState?: "saved" | "saving" | "unsaved";
 }) {
-  const { selectedIds, select, clearSelection, transformRef, activeTool, setActiveTool, content, updateElementStyle, updateContent, activePageId, editingTextId, startTextEdit, commitTextEdit, hoveredLayerId, setHoveredLayerId } = useEditor();
+  const { selectedIds, select, clearSelection, transformRef, activeTool, setActiveTool, content, updateElementStyle, updateContent, activePageId, editingTextId, startTextEdit, commitTextEdit, hoveredLayerId, setHoveredLayerId, editingComponentName, exitComponentEditMode } = useEditor();
 
   // ─── Canvas pan/zoom state ─────────────────────────────────
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -1583,7 +1583,32 @@ export function EditorCanvas({
             overflow: "visible",
           }}
         >
-          {activePage ? (
+          {editingComponentName ? (
+            <div
+              key={`component-${editingComponentName}`}
+              style={{ position: "absolute", left: 0, top: 0 }}
+            >
+              {/* Component label with back button */}
+              <div className="flex items-center gap-2 whitespace-nowrap" style={{ fontSize: 13, marginBottom: 8 }}>
+                <button
+                  onClick={exitComponentEditMode}
+                  className="text-[12px] transition-colors hover:opacity-80"
+                  style={{ color: COMPONENT_COLOR }}
+                >
+                  ← Back
+                </button>
+                <span style={{ color: "var(--ed-text-tertiary)" }}>|</span>
+                <span className="font-medium" style={{ color: COMPONENT_COLOR }}>
+                  {editingComponentName}
+                </span>
+              </div>
+              {/* Component template preview */}
+              <ComponentPreview
+                componentName={editingComponentName}
+                componentTemplates={componentTemplatesRef.current}
+              />
+            </div>
+          ) : activePage ? (
             <div
               key={activePage.id}
               style={{ position: "absolute", left: 0, top: 0 }}
@@ -1957,6 +1982,47 @@ const PageContent = memo(function PageContent({
   return <div ref={ref} className="rounded-sm shadow-2xl" />;
 });
 
+/**
+ * Component template preview — renders a component's template with default props
+ * on a neutral background for editing/inspection.
+ */
+const ComponentPreview = memo(function ComponentPreview({
+  componentName,
+  componentTemplates,
+}: {
+  componentName: string;
+  componentTemplates: Map<string, { template: string; styles: string }>;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!ref.current) return;
+    const tmpl = componentTemplates.get(componentName);
+    if (!tmpl?.template) {
+      ref.current.innerHTML = `<div style="padding: 40px; text-align: center; color: #999; font-size: 14px;">No template defined for ${componentName}</div>`;
+      return;
+    }
+    // Inject styles + expanded template with placeholder values cleared
+    let html = tmpl.template.replace(/\{\{[^}]+\}\}/g, "");
+    if (tmpl.styles) {
+      html = `<style>${tmpl.styles}</style>${html}`;
+    }
+    ref.current.innerHTML = html;
+  }, [componentName, componentTemplates]);
+  return (
+    <div
+      ref={ref}
+      className="rounded-sm shadow-2xl"
+      style={{
+        minWidth: 400,
+        minHeight: 200,
+        backgroundColor: "#ffffff",
+        padding: 24,
+        position: "relative",
+      }}
+    />
+  );
+});
+
 // ─── Parse .z10.html into page artboards ─────────────────────
 
 type PageInfo = {
@@ -1978,7 +2044,22 @@ function parsePagesFromContent(content: string): PageInfo[] {
     const doc = parser.parseFromString(content, "text/html");
     const pageElements = doc.querySelectorAll("[data-z10-page]");
 
-    if (pageElements.length === 0) return [];
+    if (pageElements.length === 0) {
+      // Fallback: wrap body content in a synthetic page so orphaned content is visible
+      if (doc.body.children.length > 0) {
+        console.warn("[editor-canvas] Content has no data-z10-page wrappers — creating synthetic page");
+        const wrapper = doc.createElement("div");
+        wrapper.setAttribute("data-z10-page", "Page 1");
+        wrapper.setAttribute("data-z10-id", "page_1");
+        wrapper.setAttribute("style", "position: relative;");
+        while (doc.body.firstChild) {
+          wrapper.appendChild(doc.body.firstChild);
+        }
+        doc.body.appendChild(wrapper);
+        return parsePagesFromContent(doc.documentElement.outerHTML);
+      }
+      return [];
+    }
 
     const pages: PageInfo[] = [];
 

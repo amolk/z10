@@ -11,7 +11,7 @@ import { toTagName } from "z10/core";
  * Shows registered Web Components grouped by category with search.
  */
 export function AssetsPanel() {
-  const { componentList } = useEditor();
+  const { componentList, enterComponentEditMode } = useEditor();
   const [search, setSearch] = useState("");
 
   const filtered = search
@@ -54,8 +54,9 @@ export function AssetsPanel() {
             {filtered.map((name) => (
               <button
                 key={name}
+                onClick={() => enterComponentEditMode(name)}
                 className="flex items-center gap-2 rounded px-3 py-1.5 text-left text-[12px] transition-colors hover:bg-[var(--ed-hover-bg)]"
-                title={`Drag to canvas or use: z10 exec to create <${toTagName(name)}>`}
+                title={`Click to edit component, or use: z10 exec to create <${toTagName(name)}>`}
               >
                 <Diamond size={14} strokeWidth={1} style={{ color: COMPONENT_COLOR, flexShrink: 0 }} />
                 <span>{name}</span>

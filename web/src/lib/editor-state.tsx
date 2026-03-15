@@ -12,6 +12,16 @@ import {
 } from "react";
 import { inferNodeType } from "@/lib/node-inference";
 import { tagNameToComponentName } from "z10/core";
+import type { ComponentProp, ComponentVariant } from "z10/core";
+import { expandComponentTemplates, parseComponentTemplates } from "@/lib/z10-dom";
+
+// ─── Parsed component schema for editor use ─────────────────
+
+export type EditorComponentSchema = {
+  name: string;
+  props: ComponentProp[];
+  variants: ComponentVariant[];
+};
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -141,6 +151,13 @@ export type EditorState = {
   exitComponentEditMode: () => void;
   createComponentFromSelection: () => void;
   componentList: string[];
+  componentSchemas: Map<string, EditorComponentSchema>;
+
+  /** Update a component instance's props (writes data-z10-props, re-expands template) */
+  updateInstanceProps: (id: string, props: Record<string, unknown>) => void;
+
+  /** Detach a component instance (remove component attrs, keep expanded content) */
+  detachInstance: (id: string) => void;
 
   // Page operations
   addPage: () => void;
@@ -194,6 +211,7 @@ export function EditorProvider({
 
   const [editingComponentName, setEditingComponentName] = useState<string | null>(null);
   const [componentList, setComponentList] = useState<string[]>([]);
+  const [componentSchemas, setComponentSchemas] = useState<Map<string, EditorComponentSchema>>(new Map());
   const [hoveredLayerId, setHoveredLayerId] = useState<string | null>(null);
 
   const enterComponentEditMode = useCallback((name: string) => {
@@ -208,17 +226,26 @@ export function EditorProvider({
     console.warn('createComponentFromSelection is not yet implemented. Use `z10 component create` via CLI.');
   }, []);
 
-  // Parse component list from content — match both new-format (component-meta)
+  // Parse component list and schemas from content — match both new-format (component-meta)
   // and old-format (component) script blocks
   useEffect(() => {
     if (!content) return;
-    const names = new Set<string>();
+    const schemas = new Map<string, EditorComponentSchema>();
 
-    // New format: <script ... data-z10-role="component-meta" data-z10-component="Name">
-    const newRe = /<script\s+(?=[^>]*data-z10-role="component-meta")(?=[^>]*data-z10-component="([^"]*)")[^>]*>/g;
+    // New format: <script ... data-z10-role="component-meta" data-z10-component="Name">...json...</script>
+    const newRe = /<script\s+type="application\/z10\+json"\s+data-z10-role="component-meta"\s+data-z10-component="([^"]*)"\s*>([\s\S]*?)<\/script>/g;
     let m: RegExpExecArray | null;
     while ((m = newRe.exec(content)) !== null) {
-      names.add(m[1]!);
+      try {
+        const raw = JSON.parse(m[2]!.trim()) as Record<string, unknown>;
+        schemas.set(m[1]!, {
+          name: m[1]!,
+          props: Array.isArray(raw["props"]) ? raw["props"] as ComponentProp[] : [],
+          variants: Array.isArray(raw["variants"]) ? raw["variants"] as ComponentVariant[] : [],
+        });
+      } catch {
+        schemas.set(m[1]!, { name: m[1]!, props: [], variants: [] });
+      }
     }
 
     // Old format: <script type="application/z10+json" data-z10-role="component"> { "name": "..." } </script>
@@ -226,16 +253,44 @@ export function EditorProvider({
     while ((m = oldRe.exec(content)) !== null) {
       try {
         const raw = JSON.parse(m[1]!.trim()) as Record<string, unknown>;
-        if (typeof raw["name"] === "string" && raw["name"]) {
-          names.add(raw["name"]);
+        if (typeof raw["name"] === "string" && raw["name"] && !schemas.has(raw["name"])) {
+          schemas.set(raw["name"], {
+            name: raw["name"],
+            props: Array.isArray(raw["props"]) ? raw["props"] as ComponentProp[] : [],
+            variants: Array.isArray(raw["variants"]) ? raw["variants"] as ComponentVariant[] : [],
+          });
         }
       } catch {
         // Skip malformed blocks
       }
     }
 
-    setComponentList(Array.from(names));
+    setComponentList(Array.from(schemas.keys()));
+    setComponentSchemas(schemas);
   }, [content]);
+
+  const updateInstanceProps = useCallback((id: string, props: Record<string, unknown>) => {
+    const el = transformRef.current?.querySelector(`[data-z10-id="${id}"]`) as HTMLElement | null;
+    if (!el) return;
+    el.setAttribute("data-z10-props", JSON.stringify(props));
+    // Mark as needing re-expansion and re-expand
+    el.removeAttribute("data-z10-expanded");
+    el.innerHTML = "";
+    const root = transformRef.current;
+    if (root) {
+      const templates = parseComponentTemplates(content || "");
+      expandComponentTemplates(root, templates);
+    }
+  }, [content]);
+
+  const detachInstance = useCallback((id: string) => {
+    const el = transformRef.current?.querySelector(`[data-z10-id="${id}"]`) as HTMLElement | null;
+    if (!el) return;
+    el.removeAttribute("data-z10-component");
+    el.removeAttribute("data-z10-props");
+    el.removeAttribute("data-z10-expanded");
+    // Content stays as-is (the expanded template becomes static content)
+  }, []);
 
   const startTextEdit = useCallback((id: string) => {
     setEditingTextId(id);
@@ -619,6 +674,9 @@ export function EditorProvider({
         exitComponentEditMode,
         createComponentFromSelection,
         componentList,
+        componentSchemas,
+        updateInstanceProps,
+        detachInstance,
         addPage,
         deletePage,
         duplicatePage,
@@ -756,7 +814,20 @@ function parseLayerTree(content: string): LayerNode[] {
   try {
     const parser = new DOMParser();
     const doc = parser.parseFromString(content, "text/html");
-    const pages = doc.querySelectorAll("[data-z10-page]");
+    let pages = doc.querySelectorAll("[data-z10-page]");
+
+    // Fallback: wrap orphaned body content in a synthetic page
+    if (pages.length === 0 && doc.body.children.length > 0) {
+      const wrapper = doc.createElement("div");
+      wrapper.setAttribute("data-z10-page", "Page 1");
+      wrapper.setAttribute("data-z10-id", "page_1");
+      wrapper.setAttribute("style", "position: relative;");
+      while (doc.body.firstChild) {
+        wrapper.appendChild(doc.body.firstChild);
+      }
+      doc.body.appendChild(wrapper);
+      pages = doc.querySelectorAll("[data-z10-page]");
+    }
 
     if (pages.length === 0) return [];
 
