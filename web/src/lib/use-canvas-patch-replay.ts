@@ -75,6 +75,11 @@ export function useCanvasPatchReplay(
 
   const handleResync = useCallback(
     (html: string, _txId: number) => {
+      const hasPages = html.includes("data-z10-page");
+      console.log(`[patch-replay] resync txId=${_txId} htmlLen=${html.length} hasPages=${hasPages}`);
+      if (!hasPages) {
+        console.warn(`[patch-replay] WARNING: resync content has no data-z10-page. Preview: ${html.slice(0, 200)}`);
+      }
       const root = transformRef.current;
       // D3: Try to replace DOM directly (avoids React re-render of PageContent)
       if (root) {

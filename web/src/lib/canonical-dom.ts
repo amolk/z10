@@ -44,6 +44,10 @@ export interface CanonicalDOM {
   dirty: boolean;
   /** Number of commits since last persist. */
   commitsSincePersist: number;
+  /** Original <head> content preserved across persist cycles. */
+  headHTML: string;
+  /** data-z10-project attribute from the original <html> element, if any. */
+  projectAttr: string;
 }
 
 export interface CanonicalDOMOptions {
@@ -126,9 +130,35 @@ export function loadCanonicalDOM(
   const window = new Window({ url: "https://z10.dev" });
   const document = window.document;
 
+  // Extract and preserve <head> content and project attr before loading body.
+  // Content may be a full <html> document or just body innerHTML.
+  let headHTML = "";
+  let projectAttr = "";
+  let bodyHTML = html;
+
   if (html) {
-    document.body.innerHTML = html;
+    // Extract data-z10-project from <html> element
+    const projectMatch = html.match(/<html\s+[^>]*data-z10-project="([^"]*)"/);
+    if (projectMatch) projectAttr = projectMatch[1];
+
+    // Extract <head>...</head> content
+    const headMatch = html.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
+    if (headMatch) headHTML = headMatch[1].trim();
+
+    // Extract body content — either from <body> tag or use as-is
+    const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    if (bodyMatch) {
+      bodyHTML = bodyMatch[1];
+    } else if (html.includes("<html")) {
+      // Full document but no body tag — shouldn't happen, but handle gracefully
+      bodyHTML = html;
+    }
+    // else: html is already just body innerHTML
+
+    document.body.innerHTML = bodyHTML;
   }
+
+  console.log(`[canonical-dom] load project=${projectId} headLen=${headHTML.length} bodyLen=${bodyHTML.length} hasPages=${bodyHTML.includes("data-z10-page")} hasProjectAttr=${!!projectAttr}`);
 
   const rootElement = document.body as unknown as Element;
   const clock = new LamportClock();
@@ -189,6 +219,8 @@ export function loadCanonicalDOM(
     lastAccess: Date.now(),
     dirty: needsBootstrap ?? false,
     commitsSincePersist: 0,
+    headHTML,
+    projectAttr,
   };
 
   instances.set(projectId, canonical);
@@ -211,12 +243,20 @@ export async function executeTransaction(
   }
 
   canonical.lastAccess = Date.now();
+  const hadPages = canonical.rootElement.innerHTML.includes("data-z10-page");
   const result = await canonical.engine.execute(code, subtreeRootNid, manifest);
 
   if (result.status === "committed") {
     canonical.currentTxId = result.txId;
     canonical.dirty = true;
     canonical.commitsSincePersist++;
+
+    // Detect if transaction removed page structure
+    const hasPages = canonical.rootElement.innerHTML.includes("data-z10-page");
+    if (hadPages && !hasPages) {
+      console.error(`[canonical-dom] CRITICAL: Transaction txId=${result.txId} removed all data-z10-page elements for project=${projectId}. Code: ${code.slice(0, 300)}`);
+    }
+    console.log(`[canonical-dom] committed txId=${result.txId} project=${projectId} ops=${result.patch.ops.length} hasPages=${hasPages}`);
 
     // C3: Broadcast patch to all connected clients
     patchBroadcast.emit(projectId, result.patch);
@@ -237,12 +277,26 @@ export async function executeTransaction(
 
 /**
  * Get the serialized HTML of the canonical DOM.
+ * Reconstructs the full <html> document including preserved <head> content.
  */
 export function getCanonicalHTML(projectId: string): string | null {
   const canonical = instances.get(projectId);
   if (!canonical) return null;
   canonical.lastAccess = Date.now();
-  return canonical.rootElement.innerHTML;
+
+  const bodyHTML = canonical.rootElement.innerHTML;
+
+  // If we have head content, reconstruct the full document
+  if (canonical.headHTML || canonical.projectAttr) {
+    const projectAttrStr = canonical.projectAttr
+      ? ` data-z10-project="${canonical.projectAttr}"`
+      : "";
+    const headStr = canonical.headHTML ? `<head>\n${canonical.headHTML}\n</head>\n` : "";
+    return `<html${projectAttrStr}>\n${headStr}<body>\n${bodyHTML}\n</body>\n</html>`;
+  }
+
+  // Legacy: content without head/html wrapper — return body innerHTML as-is
+  return bodyHTML;
 }
 
 /**
@@ -273,7 +327,16 @@ export async function persistCanonicalDOM(projectId: string): Promise<void> {
   const canonical = instances.get(projectId);
   if (!canonical || !canonical.dirty || !managerOptions.onPersist) return;
 
-  const html = canonical.rootElement.innerHTML;
+  const html = getCanonicalHTML(projectId) ?? canonical.rootElement.innerHTML;
+  const hasPages = html.includes("data-z10-page");
+  const hasHead = html.includes("<head>");
+
+  console.log(`[canonical-dom] persist project=${projectId} txId=${canonical.currentTxId} htmlLen=${html.length} hasPages=${hasPages} hasHead=${hasHead}`);
+
+  if (!hasPages) {
+    console.warn(`[canonical-dom] WARNING: persisting content WITHOUT data-z10-page for project=${projectId}. Body preview: ${canonical.rootElement.innerHTML.slice(0, 200)}`);
+  }
+
   await managerOptions.onPersist(projectId, html, canonical.currentTxId);
   canonical.dirty = false;
   canonical.commitsSincePersist = 0;

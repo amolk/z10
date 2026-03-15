@@ -30,6 +30,11 @@ export default async function EditorPage({
 
   if (!project) notFound();
 
+  const contentLen = project.content?.length ?? 0;
+  const hasPages = project.content?.includes("data-z10-page") ?? false;
+  const hasHead = project.content?.includes("<head") ?? false;
+  console.log(`[editor] Loading project=${project.id} name=${project.name} contentLen=${contentLen} hasPages=${hasPages} hasHead=${hasHead}`);
+
   return (
     <>
       <Script src="/tailwindcss.js" strategy="beforeInteractive" />
