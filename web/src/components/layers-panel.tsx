@@ -567,8 +567,9 @@ function LayerRow({ node }: { node: LayerNode }) {
       }
 
       setDropIndicator(null);
+      select(newId, false);
     },
-    [node.id, dropIndicator, content, updateContent, transformRef]
+    [node.id, dropIndicator, content, updateContent, transformRef, select]
   );
 
   return (
