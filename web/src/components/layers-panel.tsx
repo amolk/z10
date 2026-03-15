@@ -342,11 +342,13 @@ function LayerRow({ node }: { node: LayerNode }) {
     transformRef,
     content,
     updateContent,
+    hoveredLayerId,
     setHoveredLayerId,
   } = useEditor();
 
   const rowRef = useRef<HTMLDivElement>(null);
   const isSelected = selectedIds.has(node.id);
+  const isHovered = hoveredLayerId === node.id;
   const isHidden = hiddenIds.has(node.id);
   const isLocked = lockedIds.has(node.id);
   const isCollapsed = collapsedIds.has(node.id);
@@ -602,7 +604,9 @@ function LayerRow({ node }: { node: LayerNode }) {
             ? "rgba(59, 130, 246, 0.12)"
             : isSelected
               ? "var(--ed-selected-bg)"
-              : "transparent",
+              : isHovered
+                ? "var(--ed-hover-bg)"
+                : "transparent",
           color: isSelected ? "var(--ed-selected-text)" : "var(--ed-text)",
           opacity: isDragging ? 0.4 : isHidden ? 0.4 : 1,
           cursor: "default",
