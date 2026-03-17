@@ -1,12 +1,12 @@
 ---
 name: z10
-description: Use when working with z10 design tool CLI, editing designs via DOM APIs, executing JavaScript against z10 documents, handling STALE_DOM errors, setting design tokens, or defining reusable components
+description: Use when working with z10 design tool CLI, editing designs via DOM APIs, executing JavaScript against z10 documents, handling transaction conflicts, setting design tokens, or defining reusable components
 ---
 
 # z10 — AI Agent Design Tool
 
 z10 is a design tool where AI agents edit designs using standard DOM APIs.
-You write JavaScript; z10 executes it against the design document.
+You write JavaScript; z10 executes it as an atomic transaction against the design document in a sandboxed, scoped environment.
 
 ## Setup
 
@@ -31,7 +31,7 @@ z10 page load <page-id>        # optional — scopes queries to one page
 
 ## Executing Code
 
-Pipe JavaScript via stdin to `z10 exec`. Each statement executes against the design DOM.
+Pipe JavaScript via stdin to `z10 exec`. Your code runs as a single atomic transaction against the canonical DOM in a sandboxed environment.
 
 **Important:** Before creating HTML structures, refer to [docs/html-authoring-guide.md](docs/html-authoring-guide.md) for idiomatic patterns and best practices.
 
@@ -40,32 +40,48 @@ z10 exec <<'EOF'
 const nav = document.getElementById('left-nav');
 nav.style.padding = '16px';
 const item = document.createElement('p');
-item.setAttribute('data-z10-id', 'new_item');
 item.textContent = 'New Item';
 nav.appendChild(item);
 EOF
 ```
 
-**Output** — one line per statement:
+**Output on success:**
 ```
-✓ const nav = document.getElementById('left-nav');
-✓ nav.style.padding = '16px';
-✓ const item = document.createElement('p');
-✓ item.setAttribute('data-z10-id', 'new_item');
-✓ item.textContent = 'New Item';
-✓ nav.appendChild(item);
-
-6 statements, all passed
+✓ Executed (txId: 42)
+<div data-z10-id="left-nav" style="padding: 16px;">...</div>
 ```
 
-On error, the process exits immediately:
-```
-✓ const nav = document.getElementById('left-nav');
-✗ nav.querySelector('.missing').remove();
-  ERROR: Cannot read properties of null (reading 'remove')
+The server returns a txId confirming the transaction was committed.
 
-2 statements, failed
+**Output on error:**
 ```
+✗ Execution rejected [execution-error]
+
+  Your JavaScript threw an error or timed out during execution.
+  Error: Cannot read properties of null (reading 'remove')
+```
+
+## Transaction Model
+
+z10 uses a collaborative transaction model:
+
+1. **Atomic execution**: Your entire script runs as one transaction — it either fully commits or is fully rejected.
+2. **Sandboxed environment**: Code executes in a scoped sandbox against the server's canonical DOM.
+3. **Conflict detection**: If another transaction modified the same elements since your last read, you get a conflict rejection.
+4. **txId tracking**: Each successful commit returns a txId for ordering and deduplication.
+
+## Data Attributes
+
+| Attribute | Purpose | Agent access |
+|-----------|---------|-------------|
+| `data-z10-id` | Stable node identifier (also found by `getElementById`) | Read only — do not modify |
+| `data-z10-ts-*` | Internal timestamp attributes for conflict detection | Do not touch — do not modify or remove |
+| `data-z10-component` | Component type name | Read/write |
+| `data-z10-intent` | Layout intent: `layout`, `decoration`, `content`, `interaction` | Read/write |
+| `data-z10-editor` | Editor metadata (internal) | Read only |
+| `data-z10-agent-editable` | Governance: which nodes the agent may edit | Read only |
+
+**Critical**: `data-z10-id` is read only — the system assigns these. `data-z10-ts-*` attributes must not be touched; they are managed internally by the transaction engine.
 
 ## DOM API Reference
 
@@ -96,7 +112,7 @@ element.cloneNode(true)
 ### Content
 ```js
 element.textContent = 'Hello'
-element.innerHTML = '<p data-z10-id="welcome_text">Welcome back</p>'
+element.innerHTML = '<p>Welcome back</p>'
 ```
 
 ### Style
@@ -111,19 +127,8 @@ element.style.setProperty('--custom-var', 'value')
 ```js
 element.setAttribute('data-z10-intent', 'layout')
 element.classList.add('active')
-element.setAttribute('data-z10-id', 'sidebar_nav')
 element.id = 'sidebar'
 ```
-
-## z10 Data Attributes
-
-| Attribute | Purpose |
-|-----------|---------|
-| `data-z10-id` | Stable node identifier (also found by `getElementById`) |
-| `data-z10-component` | Component type name |
-| `data-z10-intent` | Layout intent: `layout`, `decoration`, `content`, `interaction` |
-| `data-z10-editor` | Editor metadata (internal) |
-| `data-z10-agent-editable` | Governance: which nodes the agent may edit |
 
 ## Design Tokens
 
@@ -144,7 +149,7 @@ element.style.padding = 'var(--spacing-md)';
 
 ## Components
 
-Components are reusable elements with configurable props. Define them with three blocks in `<head>`, then instantiate in `<body>`.
+Components are reusable Web Components with configurable props. They extend HTMLElement and are registered via `customElements.define`. Each component declares static `z10Props` for the design tool property panel.
 
 ### Defining a component
 
@@ -180,7 +185,6 @@ Instances go in `<body>` with `data-z10-component` and `data-z10-props`:
 ```bash
 z10 exec <<'EOF'
 const bubble = document.createElement('div');
-bubble.setAttribute('data-z10-id', 'user_message');
 bubble.setAttribute('data-z10-component', 'ChatBubble');
 bubble.setAttribute('data-z10-props', '{"content":"Hello!","variant":"sent"}');
 document.getElementById('chat_container').appendChild(bubble);
@@ -212,10 +216,10 @@ Any element appearing 2+ times with the same structure but different data should
 Each page has top-level frame divs as direct children of `document.body`. Always add new elements inside a top-level frame, not directly on the body. Use `z10 dom` to find the frame IDs.
 
 ```js
-// ✅ Add elements inside a top-level frame
+// Add elements inside a top-level frame
 document.getElementById('frame_page_1').appendChild(newElement);
 
-// ✅ Adding a new top-level frame is the exception
+// Adding a new top-level frame is the exception
 document.body.appendChild(newFrame);
 ```
 
@@ -232,18 +236,15 @@ EOF
 ```bash
 z10 exec <<'EOF'
 const container = document.createElement('div');
-container.setAttribute('data-z10-id', 'app_shell');
 container.style.display = 'flex';
 container.style.flexDirection = 'row';
 container.style.gap = '16px';
 container.style.padding = '24px';
 const sidebar = document.createElement('aside');
-sidebar.setAttribute('data-z10-id', 'sidebar');
 sidebar.style.display = 'flex';
 sidebar.style.flexDirection = 'column';
 sidebar.style.width = '240px';
 const main = document.createElement('main');
-main.setAttribute('data-z10-id', 'main_content');
 main.style.display = 'flex';
 main.style.flexDirection = 'column';
 main.style.flex = '1';
@@ -255,25 +256,39 @@ EOF
 
 ## Error Recovery
 
-### STALE_DOM
+### Transaction rejected — conflict
 ```
-✗ nav.appendChild(newItem);
-  ERROR: STALE_DOM — local and server checksums differ
-```
-Someone edited the design while you were working. Run `z10 dom` to refresh, re-read the DOM, then retry.
+✗ Execution rejected [conflict]
 
-### Element not found
+  The DOM was modified by another transaction since your last read.
+  Conflict: {"type":"style-property","nid":"n1","property":"padding"}
 ```
-✗ document.getElementById('sidebar').style.padding = '8px';
-  ERROR: Cannot read properties of null (reading 'style')
+Another transaction modified the same elements. Run `z10 dom` to get the latest state, then retry your operation.
+
+### Transaction rejected — illegal modification
 ```
-Run `z10 dom` to check correct IDs.
+✗ Execution rejected [illegal-modification]
+
+  Your code modified protected system attributes (data-z10-id or data-z10-ts-*).
+```
+Do not set or remove `data-z10-id` or `data-z10-ts-*` attributes. These are managed by the transaction engine. Illegal modification of system attributes will cause the transaction to be rejected.
+
+### Transaction rejected — execution error
+```
+✗ Execution rejected [execution-error]
+
+  Your JavaScript threw an error or timed out during execution.
+  Error: Cannot read properties of null (reading 'style')
+```
+Run `z10 dom` to check correct IDs and element structure.
 
 ### Syntax error
 ```
-Parse error: Unexpected token (line 3, col 12)
+✗ Execution rejected [execution-error]
+
+  Error: SyntaxError: Unexpected token
 ```
-Check your JavaScript syntax. The parser expects complete statements.
+Check your JavaScript syntax.
 
 ## Governance
 
@@ -284,6 +299,6 @@ z10 enforces edit permissions via `data-z10-agent-editable`:
 
 If governance blocks an edit:
 ```
-✗ protectedNode.remove();
+✗ Execution rejected [execution-error]
   ERROR: GOVERNANCE_DENIED — node 'header' is not agent-editable
 ```

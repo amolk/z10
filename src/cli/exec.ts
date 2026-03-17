@@ -39,6 +39,38 @@ export function computeRetryDelay(attempt: number, opts: RetryOptions): number {
   return Math.min(exponential + jitter, opts.maxDelayMs);
 }
 
+/** Minimal interface for the proxy object used by submitWithRetry. */
+interface SubmitProxy {
+  submitCode(code: string, ticketId: string): Promise<import('../dom/proxy.js').SubmitResult>;
+}
+
+/**
+ * Submit code with exponential backoff retry on conflict rejections.
+ * Non-conflict rejections and commits return immediately.
+ */
+export async function submitWithRetry(
+  proxy: SubmitProxy,
+  code: string,
+  ticketId: string,
+  opts: RetryOptions = DEFAULT_RETRY,
+): Promise<import('../dom/proxy.js').SubmitResult> {
+  let currentTicket = ticketId;
+  let lastResult: import('../dom/proxy.js').SubmitResult | undefined;
+  for (let attempt = 0; attempt < opts.maxAttempts; attempt++) {
+    const result = await proxy.submitCode(code, currentTicket);
+    if (result.status === 'committed') return result;
+    // Only retry on conflict with actual conflicts
+    if (result.reason !== 'conflict' || !result.conflicts?.length) return result;
+    lastResult = result;
+    // Use fresh ticket from rejection for next attempt
+    currentTicket = result.newTicketId;
+    if (attempt < opts.maxAttempts - 1) {
+      await new Promise(r => setTimeout(r, computeRetryDelay(attempt, opts)));
+    }
+  }
+  return lastResult!;
+}
+
 // ── CLI exec command ──
 
 /**

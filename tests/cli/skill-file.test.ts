@@ -15,7 +15,7 @@ describe('E1 skill file accuracy', () => {
   let content: string;
 
   beforeAll(() => {
-    const skillPath = resolve(__dirname, '../../z10.skill.md');
+    const skillPath = resolve(__dirname, '../../skills/z10/SKILL.md');
     content = readFileSync(skillPath, 'utf-8');
   });
 
