@@ -161,11 +161,16 @@ export function executeSandboxCode(
  * Runs a script inside the context that freezes Object.prototype, Array.prototype, etc.
  */
 function freezeBuiltins(context: object): void {
+  // Use a shared object to communicate failures back from the sandbox.
+  // We can't use globalThis (it's undefined in the sandbox) so we inject
+  // a mutable report object into the context before running the freeze script.
+  const report = { failures: [] as string[] };
+  (context as Record<string, unknown>).__freezeReport = report;
+
   const freezeScript = `
     (function() {
       var freeze = Object.freeze;
-      var getOwnPropertyNames = Object.getOwnPropertyNames;
-      var getPrototypeOf = Object.getPrototypeOf;
+      var report = __freezeReport;
 
       // Freeze core prototypes
       var targets = [
@@ -187,7 +192,7 @@ function freezeBuiltins(context: object): void {
       if (typeof Set !== 'undefined') targets.push(Set.prototype);
 
       for (var i = 0; i < targets.length; i++) {
-        try { freeze(targets[i]); } catch(e) {}
+        try { freeze(targets[i]); } catch(e) { report.failures.push('proto-' + i); }
       }
 
       // Freeze Object itself and other constructors
@@ -196,8 +201,16 @@ function freezeBuiltins(context: object): void {
       if (typeof Set !== 'undefined') constructors.push(Set);
 
       for (var i = 0; i < constructors.length; i++) {
-        try { freeze(constructors[i]); } catch(e) {}
+        try { freeze(constructors[i]); } catch(e) { report.failures.push('ctor-' + i); }
       }
+
+      // Post-freeze verification of critical prototypes
+      if (!Object.isFrozen(Object.prototype)) report.failures.push('verify-Object.prototype');
+      if (!Object.isFrozen(Array.prototype)) report.failures.push('verify-Array.prototype');
+      if (!Object.isFrozen(Function.prototype)) report.failures.push('verify-Function.prototype');
+
+      // Clean up — don't leave report accessible to agent code
+      delete __freezeReport;
     })();
   `;
 
@@ -206,8 +219,22 @@ function freezeBuiltins(context: object): void {
       timeout: 1000,
       filename: 'sandbox-init.js',
     });
-  } catch {
-    // If freezing fails, context is still usable but less hardened
+  } catch (err) {
+    throw new Error(`Sandbox hardening failed: ${err instanceof Error ? err.message : err}`);
+  } finally {
+    // Clean up from host side — must run even if freeze script throws
+    delete (context as Record<string, unknown>).__freezeReport;
+  }
+
+  const failures = report.failures;
+  if (failures.length > 0) {
+    // Verification failures (verify-*) are critical — freeze didn't stick
+    const verifyFailures = failures.filter(f => f.startsWith('verify-'));
+    if (verifyFailures.length > 0) {
+      throw new Error(`Sandbox hardening verification failed: ${verifyFailures.join(', ')}`);
+    }
+    // Individual target failures are warnings
+    console.warn(`[z10] Sandbox freeze partial failures: ${failures.join(', ')}`);
   }
 }
 

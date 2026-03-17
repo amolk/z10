@@ -333,6 +333,38 @@ export function expandComponentTemplates(
 
     el.innerHTML = expanded;
     el.setAttribute("data-z10-expanded", "true");
+
+    // Scope any template-level data-z10-id attributes to this instance
+    // so that multiple instances don't share the same child IDs.
+    // Template IDs like "cmp-EmailRow-1" become instance-scoped so
+    // querySelector always finds the correct one.
+    const instanceId = el.getAttribute("data-z10-id");
+    if (instanceId) {
+      const children = el.querySelectorAll("[data-z10-id]");
+      for (const child of children) {
+        const childId = child.getAttribute("data-z10-id");
+        if (childId && childId.startsWith("cmp-")) {
+          child.setAttribute("data-z10-id", `${instanceId}::${childId}`);
+        }
+      }
+    }
+
+    // Apply any stored style overrides for this instance
+    const overridesStr = el.getAttribute("data-z10-overrides");
+    if (overridesStr && instanceId) {
+      try {
+        const overrides: Record<string, Record<string, string>> = JSON.parse(overridesStr);
+        for (const [templateChildId, styles] of Object.entries(overrides)) {
+          const scopedId = `${instanceId}::${templateChildId}`;
+          const childEl = el.querySelector(`[data-z10-id="${scopedId}"]`) as HTMLElement | null;
+          if (childEl) {
+            for (const [prop, value] of Object.entries(styles)) {
+              childEl.style.setProperty(prop, value);
+            }
+          }
+        }
+      } catch { /* ignore malformed overrides */ }
+    }
   }
 }
 

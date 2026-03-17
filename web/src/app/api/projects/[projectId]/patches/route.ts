@@ -28,6 +28,10 @@ import { getCurrentTxId, getPatches, getCanonicalHTML } from "@/lib/canonical-do
 
 export const dynamic = "force-dynamic";
 
+// Per-user SSE connection counter to bound aggregate load
+const sseConnectionsPerUser = new Map<string, number>();
+const MAX_SSE_PER_USER = 20;
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
@@ -41,6 +45,17 @@ export async function GET(
   }
 
   const { projectId } = await params;
+  const userId = authResult.userId;
+
+  // Enforce per-user SSE connection limit
+  const currentConns = sseConnectionsPerUser.get(userId) ?? 0;
+  if (currentConns >= MAX_SSE_PER_USER) {
+    return new Response(JSON.stringify({ error: "Too many SSE connections" }), {
+      status: 429,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  sseConnectionsPerUser.set(userId, currentConns + 1);
 
   // Parse lastSeenTxId from query params for reconnection (C5)
   const url = new URL(request.url);
@@ -63,19 +78,50 @@ export async function GET(
       const txId = getCurrentTxId(projectId) ?? 0;
       send(JSON.stringify({ type: "connected", projectId, txId }));
 
+      // Buffer patches that arrive during replay to avoid lost-patch window
+      type PatchMsg = { txId: number; [key: string]: unknown };
+      const pendingPatches: PatchMsg[] = [];
+      let replayDone = false;
+
+      // Subscribe FIRST to capture any patches committed during replay
+      const unsubscribe = patchBroadcast.subscribe(projectId, (patch) => {
+        if (!replayDone) {
+          pendingPatches.push(patch as unknown as PatchMsg);
+        } else {
+          send(JSON.stringify({ type: "patch", patch }));
+        }
+      });
+
+      // Subscribe to resync broadcasts (e.g. after component create/delete)
+      const unsubscribeResync = patchBroadcast.subscribeResync(projectId, (html, txId) => {
+        send(JSON.stringify({ type: "resync", html, txId }));
+      });
+
       // C5: Replay missed patches on reconnection
+      let highestReplayedTxId = lastSeenTxId ?? txId;
       if (lastSeenTxId !== null && !isNaN(lastSeenTxId) && lastSeenTxId < txId) {
         const missed = getPatches(projectId, lastSeenTxId);
         if (missed === null) {
-          // Gap too large — ring buffer doesn't have old enough patches.
-          // Send full resync so client can rebuild its DOM from scratch.
+          // Gap too large — send full resync
           const html = getCanonicalHTML(projectId) ?? "";
           send(JSON.stringify({ type: "resync", html, txId }));
+          highestReplayedTxId = txId;
         } else {
-          // Replay missed patches in order
           for (const patch of missed) {
             send(JSON.stringify({ type: "patch", patch }));
+            const patchTxId = (patch as unknown as PatchMsg).txId;
+            if (typeof patchTxId === "number" && patchTxId > highestReplayedTxId) {
+              highestReplayedTxId = patchTxId;
+            }
           }
+        }
+      }
+
+      // Flush pending patches (skip any already replayed)
+      replayDone = true;
+      for (const patch of pendingPatches) {
+        if (typeof patch.txId !== "number" || patch.txId > highestReplayedTxId) {
+          send(JSON.stringify({ type: "patch", patch }));
         }
       }
 
@@ -84,21 +130,18 @@ export async function GET(
         send(JSON.stringify({ type: "heartbeat" }));
       }, 30_000);
 
-      // Subscribe to patch broadcasts for new commits going forward
-      const unsubscribe = patchBroadcast.subscribe(projectId, (patch) => {
-        send(JSON.stringify({ type: "patch", patch }));
-      });
-
-      // Subscribe to resync broadcasts (e.g. after component create/delete)
-      const unsubscribeResync = patchBroadcast.subscribeResync(projectId, (html, txId) => {
-        send(JSON.stringify({ type: "resync", html, txId }));
-      });
-
       // Cleanup on client disconnect
       const cleanup = () => {
         clearInterval(heartbeat);
         unsubscribe();
         unsubscribeResync();
+        // Decrement per-user SSE connection count
+        const count = sseConnectionsPerUser.get(userId) ?? 1;
+        if (count <= 1) {
+          sseConnectionsPerUser.delete(userId);
+        } else {
+          sseConnectionsPerUser.set(userId, count - 1);
+        }
       };
 
       request.signal.addEventListener("abort", cleanup);

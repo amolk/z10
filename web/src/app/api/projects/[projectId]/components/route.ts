@@ -2,6 +2,10 @@
  * GET  /api/projects/:id/components         — List registered components
  * GET  /api/projects/:id/components?verbose  — Full schemas with instance counts
  * POST /api/projects/:id/components         — Create a new component
+ *
+ * IMPORTANT: These routes read/write through the canonical DOM to avoid
+ * overwriting in-flight body mutations from exec/transact. Component
+ * definitions live in <head> (canonical.headHTML); body content is untouched.
  */
 
 import { NextResponse } from "next/server";
@@ -19,8 +23,86 @@ import {
   generateClassBody,
 } from "z10";
 import type { ComponentSchema } from "z10";
-import { evictCanonicalDOM } from "@/lib/canonical-dom";
+import {
+  getCanonicalDOM,
+  getCanonicalHTML,
+  getCanonicalDOMInstance,
+  persistCanonicalDOM,
+} from "@/lib/canonical-dom";
 import { patchBroadcast } from "@/lib/patch-broadcast";
+import { ensureCanonicalConfigured } from "@/lib/ensure-canonical-configured";
+
+/**
+ * Load the current document state from the canonical DOM (preferred)
+ * or fall back to DB. Returns a parsed Z10Document that reflects the
+ * latest in-memory state including uncommitted exec mutations.
+ */
+async function loadCurrentDoc(
+  projectId: string,
+  userId: string,
+): Promise<{ doc: ReturnType<typeof parseZ10Html>; error?: undefined } | { error: NextResponse }> {
+  ensureCanonicalConfigured();
+
+  // Verify project ownership
+  const [project] = await db
+    .select({ content: projects.content })
+    .from(projects)
+    .where(and(eq(projects.id, projectId), eq(projects.ownerId, userId)));
+
+  if (!project) {
+    return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
+  }
+
+  // Prefer canonical DOM (has latest exec mutations) over DB (may be stale)
+  const canonicalHTML = getCanonicalHTML(projectId);
+  const html = canonicalHTML ?? project.content;
+
+  let doc;
+  try {
+    doc = html ? parseZ10Html(html) : createDocumentWithPage();
+  } catch {
+    doc = createDocumentWithPage();
+  }
+
+  return { doc };
+}
+
+/**
+ * After modifying component definitions on a Z10Document, extract the
+ * updated <head> content and apply it to the canonical DOM's headHTML.
+ * Then persist and broadcast.
+ */
+async function applyHeadUpdate(
+  projectId: string,
+  doc: ReturnType<typeof parseZ10Html>,
+): Promise<string> {
+  const fullHtml = serializeZ10Html(doc);
+
+  // Extract the new <head> content
+  const headMatch = fullHtml.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
+  const newHeadHTML = headMatch ? headMatch[1].trim() : "";
+
+  // Update the canonical DOM's headHTML if it's loaded
+  const canonical = getCanonicalDOMInstance(projectId);
+  if (canonical) {
+    canonical.headHTML = newHeadHTML;
+    canonical.dirty = true;
+    // Persist canonical DOM (includes latest body + updated head)
+    await persistCanonicalDOM(projectId, true);
+    // Broadcast resync with the canonical's full state (body + head)
+    const resyncHtml = getCanonicalHTML(projectId) ?? fullHtml;
+    patchBroadcast.emitResync(projectId, resyncHtml, Date.now());
+    return resyncHtml;
+  }
+
+  // No canonical DOM loaded — safe to write directly to DB
+  await db
+    .update(projects)
+    .set({ content: fullHtml, updatedAt: new Date() })
+    .where(eq(projects.id, projectId));
+  patchBroadcast.emitResync(projectId, fullHtml, Date.now());
+  return fullHtml;
+}
 
 export async function GET(
   request: Request,
@@ -34,21 +116,9 @@ export async function GET(
   const { projectId } = await params;
   const { userId } = authResult;
 
-  const [project] = await db
-    .select({ content: projects.content })
-    .from(projects)
-    .where(and(eq(projects.id, projectId), eq(projects.ownerId, userId)));
-
-  if (!project) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-
-  let doc;
-  try {
-    doc = project.content ? parseZ10Html(project.content) : createDocumentWithPage();
-  } catch {
-    doc = createDocumentWithPage();
-  }
+  const result = await loadCurrentDoc(projectId, userId);
+  if ("error" in result) return result.error;
+  const { doc } = result;
 
   const url = new URL(request.url);
   const verbose = url.searchParams.get("verbose") === "true";
@@ -100,14 +170,9 @@ export async function POST(
   const { projectId } = await params;
   const { userId } = authResult;
 
-  const [project] = await db
-    .select({ content: projects.content })
-    .from(projects)
-    .where(and(eq(projects.id, projectId), eq(projects.ownerId, userId)));
-
-  if (!project) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
+  const result = await loadCurrentDoc(projectId, userId);
+  if ("error" in result) return result.error;
+  const { doc } = result;
 
   let body: {
     name: string;
@@ -130,13 +195,6 @@ export async function POST(
       { error: "Missing or invalid 'name' field" },
       { status: 400 }
     );
-  }
-
-  let doc;
-  try {
-    doc = project.content ? parseZ10Html(project.content) : createDocumentWithPage();
-  } catch {
-    doc = createDocumentWithPage();
   }
 
   // Check for duplicate
@@ -167,21 +225,8 @@ export async function POST(
   // Register in the document
   registerComponent(doc, schema);
 
-  // Serialize and persist
-  const html = serializeZ10Html(doc);
-
-  await db
-    .update(projects)
-    .set({ content: html, updatedAt: new Date() })
-    .where(eq(projects.id, projectId));
-
-  // Evict the in-memory canonical DOM so the next exec reloads from DB
-  // with the new component definition included.
-  await evictCanonicalDOM(projectId);
-
-  // Broadcast a resync so the browser picks up the new content
-  // (component definition in head, updated component list in Assets panel).
-  patchBroadcast.emitResync(projectId, html, Date.now());
+  // Update head through canonical DOM (preserves body state)
+  await applyHeadUpdate(projectId, doc);
 
   return NextResponse.json({ tagName, name: body.name }, { status: 201 });
 }

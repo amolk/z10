@@ -14,6 +14,7 @@ import type {
   GovernanceLevel,
 } from './types.js';
 import { toTagName } from './types.js';
+import { propagateToInstances } from './propagation.js';
 
 /** Default project configuration */
 function defaultConfig(): ProjectConfig {
@@ -152,10 +153,19 @@ export function addNode(doc: Z10Document, node: Z10Node): void {
   }
 }
 
-/** Remove a node and all its descendants from the document */
+/** Remove a node and all its descendants from the document.
+ *  Throws if the node is a page root — remove the page first. */
 export function removeNode(doc: Z10Document, id: NodeId): Z10Node | undefined {
   const node = doc.nodes.get(id);
   if (!node) return undefined;
+
+  // Guard: prevent deletion of page root nodes
+  const pageRef = doc.pages.find(p => p.rootNodeId === id);
+  if (pageRef) {
+    const err = new Error(`Cannot remove node "${id}": it is the root of page "${pageRef.name}". Remove the page first.`);
+    err.name = "PageRootRemovalError";
+    throw err;
+  }
 
   // Recursively remove children (copy array since we're mutating)
   for (const childId of [...node.children]) {
@@ -266,6 +276,8 @@ export function registerComponent(doc: Z10Document, schema: ComponentSchema): vo
     classBody: schema.classBody ?? '',
   };
   doc.components.set(resolved.name, resolved);
+  // Propagate updated defaults to existing instances
+  propagateToInstances(doc, resolved.name);
 }
 
 /** Remove a component schema by name. Returns true if it existed. */
@@ -309,6 +321,18 @@ export function detachInstance(doc: Z10Document, instanceId: NodeId): Z10Node | 
 /** Add a page to the document */
 export function addPage(doc: Z10Document, page: Z10Page): void {
   doc.pages.push(page);
+}
+
+/** Remove a page by name. Optionally removes the root node tree as well. */
+export function removePage(doc: Z10Document, name: string, opts?: { removeRootNode?: boolean }): boolean {
+  const idx = doc.pages.findIndex(p => p.name === name);
+  if (idx === -1) return false;
+  const rootNodeId = doc.pages[idx]!.rootNodeId;
+  doc.pages.splice(idx, 1);
+  if (opts?.removeRootNode) {
+    removeNode(doc, rootNodeId);
+  }
+  return true;
 }
 
 /** Get a page by name */

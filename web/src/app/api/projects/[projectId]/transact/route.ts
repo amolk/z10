@@ -22,8 +22,7 @@ import {
   getCanonicalDOM,
   executeTransaction,
   getCanonicalHTML,
-  persistCanonicalDOM,
-  configureCanonicalDOM,
+  persistTxId,
 } from "@/lib/canonical-dom";
 import {
   deserializeManifest,
@@ -32,27 +31,16 @@ import {
   serializeManifest,
   type SerializedManifest,
 } from "z10/dom";
+import { getUserLimiter } from "@/lib/request-rate-limit";
+import { ensureCanonicalConfigured } from "@/lib/ensure-canonical-configured";
 
-// Ensure canonical DOM manager is configured with DB persistence
-let configured = false;
-function ensureConfigured() {
-  if (configured) return;
-  configured = true;
-  configureCanonicalDOM({
-    onPersist: async (projectId, html) => {
-      await db
-        .update(projects)
-        .set({ content: html, updatedAt: new Date() })
-        .where(eq(projects.id, projectId));
-    },
-  });
-}
+const MAX_CODE_SIZE = 1_000_000; // 1MB
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
-  ensureConfigured();
+  ensureCanonicalConfigured();
 
   const authResult = await authenticateMcp(request);
   if (!authResult) {
@@ -61,6 +49,16 @@ export async function POST(
 
   const { projectId } = await params;
   const { userId } = authResult;
+
+  // Per-request rate limiting
+  const limiter = getUserLimiter(userId);
+  const rateResult = limiter.tryWrite();
+  if (!rateResult.allowed) {
+    return NextResponse.json(
+      { error: "Rate limit exceeded" },
+      { status: 429, headers: { "Retry-After": String(Math.ceil(rateResult.retryAfterMs / 1000)) } }
+    );
+  }
 
   // Validate request body
   let body: {
@@ -85,15 +83,23 @@ export async function POST(
     );
   }
 
+  // Input size bound
+  if (body.code.length > MAX_CODE_SIZE) {
+    return NextResponse.json(
+      { error: `Code exceeds maximum size (${MAX_CODE_SIZE} bytes)` },
+      { status: 413 }
+    );
+  }
+
   // Get or load canonical DOM for this project
   const canonical = await getCanonicalDOM(projectId, async () => {
     const [project] = await db
-      .select({ content: projects.content })
+      .select({ content: projects.content, lastTxId: projects.lastTxId })
       .from(projects)
       .where(and(eq(projects.id, projectId), eq(projects.ownerId, userId)));
 
     if (!project) return null;
-    return project.content;
+    return { html: project.content ?? "", lastTxId: project.lastTxId };
   });
 
   if (!canonical) {
@@ -126,9 +132,9 @@ export async function POST(
     );
 
     if (result.status === "committed") {
-      // Persist to DB (eventual — auto-persist handles batching)
-      // For now, persist on every commit to match current behavior
-      await persistCanonicalDOM(projectId);
+      // Persist txId to DB before ack (lightweight integer UPDATE).
+      // Full HTML persist is batched via auto-persist (dirty flag + commitsSincePersist).
+      await persistTxId(projectId);
 
       return NextResponse.json({
         status: "committed",

@@ -12,7 +12,7 @@ import { auth } from "@/auth";
 import { db } from "@/db";
 import { connectTokens, projects } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
-import { generateConnectToken, CONNECT_TOKEN_TTL_MS } from "@/lib/mcp-auth";
+import { generateConnectToken, hashApiKey, CONNECT_TOKEN_TTL_MS } from "@/lib/mcp-auth";
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -50,8 +50,8 @@ export async function POST(request: Request) {
   // Check for existing non-expired token
   const [existing] = await db
     .select({
-      token: connectTokens.token,
       expiresAt: connectTokens.expiresAt,
+      tokenHash: connectTokens.tokenHash,
     })
     .from(connectTokens)
     .where(
@@ -62,10 +62,12 @@ export async function POST(request: Request) {
     );
 
   if (existing && existing.expiresAt > new Date()) {
+    // Token exists but can't be re-displayed (hashed). Tell the client.
     return json({
-      token: existing.token,
+      exists: true,
       expiresAt: existing.expiresAt.toISOString(),
       projectId,
+      message: "A connect token already exists for this project. Use DELETE to regenerate.",
     });
   }
 
@@ -81,18 +83,19 @@ export async function POST(request: Request) {
       );
   }
 
-  // Create new token
-  const token = generateConnectToken();
+  // Create new token (store hash, return raw once)
+  const raw = generateConnectToken();
+  const tokenHash = await hashApiKey(raw);
   const expiresAt = new Date(Date.now() + CONNECT_TOKEN_TTL_MS);
 
   await db.insert(connectTokens).values({
     userId,
     projectId,
-    token,
+    tokenHash,
     expiresAt,
   });
 
-  return json({ token, expiresAt: expiresAt.toISOString(), projectId }, 201);
+  return json({ token: raw, expiresAt: expiresAt.toISOString(), projectId }, 201);
 }
 
 /**
@@ -131,16 +134,17 @@ export async function DELETE(request: Request) {
       )
     );
 
-  // Create new token
-  const token = generateConnectToken();
+  // Create new token (store hash, return raw once)
+  const raw = generateConnectToken();
+  const tokenHash = await hashApiKey(raw);
   const expiresAt = new Date(Date.now() + CONNECT_TOKEN_TTL_MS);
 
   await db.insert(connectTokens).values({
     userId,
     projectId,
-    token,
+    tokenHash,
     expiresAt,
   });
 
-  return json({ token, expiresAt: expiresAt.toISOString(), projectId }, 201);
+  return json({ token: raw, expiresAt: expiresAt.toISOString(), projectId }, 201);
 }

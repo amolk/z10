@@ -15,6 +15,20 @@
       "when": 1773285499793,
       "tag": "0001_foamy_oracle",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1773888000000,
+      "tag": "0002_durable_clock_and_token_hash",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1773601347374,
+      "tag": "0003_solid_captain_america",
+      "breakpoints": true
     }
   ]
 }

@@ -2,6 +2,10 @@
  * GET    /api/projects/:id/components/:name          — Component detail
  * PUT    /api/projects/:id/components/:name          — Update component
  * DELETE /api/projects/:id/components/:name[?detach] — Remove component
+ *
+ * IMPORTANT: These routes read/write through the canonical DOM to avoid
+ * overwriting in-flight body mutations from exec/transact. Component
+ * definitions live in <head> (canonical.headHTML); body content is untouched.
  */
 
 import { NextResponse } from "next/server";
@@ -22,12 +26,21 @@ import {
   propagateToInstances,
 } from "z10";
 import type { ComponentSchema, Z10Document } from "z10";
-import { evictCanonicalDOM } from "@/lib/canonical-dom";
+import {
+  getCanonicalHTML,
+  getCanonicalDOMInstance,
+  persistCanonicalDOM,
+} from "@/lib/canonical-dom";
 import { patchBroadcast } from "@/lib/patch-broadcast";
+import { ensureCanonicalConfigured } from "@/lib/ensure-canonical-configured";
 
 type RouteParams = { params: Promise<{ projectId: string; name: string }> };
 
-/** Load project from DB and parse the document. Returns null tuple on auth/not-found. */
+/**
+ * Load the current document state from the canonical DOM (preferred)
+ * or fall back to DB. Returns a parsed Z10Document that reflects the
+ * latest in-memory state including uncommitted exec mutations.
+ */
 async function loadProject(
   request: Request,
   params: RouteParams["params"]
@@ -35,6 +48,8 @@ async function loadProject(
   | { doc: Z10Document; projectId: string; userId: string; name: string; error?: undefined }
   | { error: NextResponse }
 > {
+  ensureCanonicalConfigured();
+
   const authResult = await authenticateMcp(request);
   if (!authResult) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
@@ -43,6 +58,7 @@ async function loadProject(
   const { projectId } = await params;
   const { userId } = authResult;
 
+  // Verify project ownership
   const [project] = await db
     .select({ content: projects.content })
     .from(projects)
@@ -52,9 +68,13 @@ async function loadProject(
     return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
   }
 
+  // Prefer canonical DOM (has latest exec mutations) over DB (may be stale)
+  const canonicalHTML = getCanonicalHTML(projectId);
+  const html = canonicalHTML ?? project.content;
+
   let doc;
   try {
-    doc = project.content ? parseZ10Html(project.content) : createDocumentWithPage();
+    doc = html ? parseZ10Html(html) : createDocumentWithPage();
   } catch {
     doc = createDocumentWithPage();
   }
@@ -63,18 +83,40 @@ async function loadProject(
   return { doc, projectId, userId, name };
 }
 
-/** Serialize the document, persist to DB, evict canonical DOM, and notify browser. */
-async function persistDoc(doc: Z10Document, projectId: string): Promise<void> {
-  const html = serializeZ10Html(doc);
+/**
+ * After modifying component definitions on a Z10Document, extract the
+ * updated <head> content and apply it to the canonical DOM's headHTML.
+ * Then persist and broadcast.
+ */
+async function applyHeadUpdate(
+  projectId: string,
+  doc: Z10Document,
+): Promise<void> {
+  const fullHtml = serializeZ10Html(doc);
+
+  // Extract the new <head> content
+  const headMatch = fullHtml.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
+  const newHeadHTML = headMatch ? headMatch[1].trim() : "";
+
+  // Update the canonical DOM's headHTML if it's loaded
+  const canonical = getCanonicalDOMInstance(projectId);
+  if (canonical) {
+    canonical.headHTML = newHeadHTML;
+    canonical.dirty = true;
+    // Persist canonical DOM (includes latest body + updated head)
+    await persistCanonicalDOM(projectId, true);
+    // Broadcast resync with the canonical's full state (body + head)
+    const resyncHtml = getCanonicalHTML(projectId) ?? fullHtml;
+    patchBroadcast.emitResync(projectId, resyncHtml, Date.now());
+    return;
+  }
+
+  // No canonical DOM loaded — safe to write directly to DB
   await db
     .update(projects)
-    .set({ content: html, updatedAt: new Date() })
+    .set({ content: fullHtml, updatedAt: new Date() })
     .where(eq(projects.id, projectId));
-
-  // Evict stale canonical DOM so next exec reloads from DB
-  await evictCanonicalDOM(projectId);
-  // Notify browser to resync (head changed — component definitions)
-  patchBroadcast.emitResync(projectId, html, Date.now());
+  patchBroadcast.emitResync(projectId, fullHtml, Date.now());
 }
 
 // ---------------------------------------------------------------------------
@@ -113,7 +155,7 @@ export async function GET(request: Request, { params }: RouteParams) {
 }
 
 // ---------------------------------------------------------------------------
-// PUT — update component definition, re-register, re-serialize, persist
+// PUT — update component definition, re-register, propagate, persist
 // ---------------------------------------------------------------------------
 
 export async function PUT(request: Request, { params }: RouteParams) {
@@ -163,7 +205,7 @@ export async function PUT(request: Request, { params }: RouteParams) {
   // Propagate changes to all instances (non-overridden attrs reset to new defaults)
   propagateToInstances(doc, name);
 
-  await persistDoc(doc, projectId);
+  await applyHeadUpdate(projectId, doc);
 
   return NextResponse.json({
     name: updated.name,
@@ -203,7 +245,7 @@ export async function DELETE(request: Request, { params }: RouteParams) {
 
   unregisterComponent(doc, name);
 
-  await persistDoc(doc, projectId);
+  await applyHeadUpdate(projectId, doc);
 
   return NextResponse.json({
     removed: name,

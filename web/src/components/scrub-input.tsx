@@ -177,10 +177,11 @@ export function ScrubInput({
           className="w-full rounded px-1.5 py-0.5 text-[11px] tabular-nums focus:outline-none"
           style={{
             backgroundColor: "var(--ed-input-bg)",
+            borderWidth: "1px",
+            borderStyle: "solid",
             borderColor: isScrubbing
               ? "var(--ed-input-border-focus)"
               : "var(--ed-input-border)",
-            border: "1px solid var(--ed-input-border)",
             color: "var(--ed-text)",
           }}
         />
@@ -214,7 +215,9 @@ export function ScrubInput({
           className="w-full rounded px-1.5 py-1 text-[11px] tabular-nums focus:outline-none"
           style={{
             backgroundColor: "var(--ed-input-bg)",
-            border: "1px solid var(--ed-input-border)",
+            borderWidth: "1px",
+            borderStyle: "solid",
+            borderColor: "var(--ed-input-border)",
             color: "var(--ed-text)",
           }}
           onFocusCapture={(e) => {

@@ -11,18 +11,16 @@ import { auth } from "@/auth";
 import { db } from "@/db";
 import { apiKeys, connectTokens } from "@/db/schema";
 import { eq } from "drizzle-orm";
+import { createHash } from "node:crypto";
 
 export type McpAuthResult = { userId: string; projectId?: string } | null;
 
 /**
- * Hash an API key using SHA-256 (Web Crypto API, works in Edge runtime).
+ * Hash an API key using SHA-256 (Node.js native crypto — synchronous and faster
+ * than Web Crypto API for server-side use).
  */
-export async function hashApiKey(rawKey: string): Promise<string> {
-  const encoded = new TextEncoder().encode(rawKey);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", encoded);
-  return Array.from(new Uint8Array(hashBuffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+export function hashApiKey(rawKey: string): string {
+  return createHash("sha256").update(rawKey).digest("hex");
 }
 
 /**
@@ -69,16 +67,37 @@ export async function authenticateMcp(
   if (authHeader?.startsWith("Bearer ")) {
     const rawToken = authHeader.slice(7).trim();
 
-    // 2a. Connect token (plain-text lookup, project-scoped)
+    // 2a. Connect token (hash-based lookup, project-scoped)
     if (rawToken.startsWith("z10_ct_")) {
-      const [found] = await db
+      const tokenHash = hashApiKey(rawToken);
+
+      // Try hash-based lookup first (new tokens), fall back to plaintext (legacy)
+      let found: { userId: string; projectId: string; expiresAt: Date } | undefined;
+      let foundByHash = false;
+      const [byHash] = await db
         .select({
           userId: connectTokens.userId,
           projectId: connectTokens.projectId,
           expiresAt: connectTokens.expiresAt,
         })
         .from(connectTokens)
-        .where(eq(connectTokens.token, rawToken));
+        .where(eq(connectTokens.tokenHash, tokenHash));
+
+      if (byHash) {
+        found = byHash;
+        foundByHash = true;
+      } else {
+        // Legacy fallback: plaintext lookup for tokens created before migration
+        const [byPlain] = await db
+          .select({
+            userId: connectTokens.userId,
+            projectId: connectTokens.projectId,
+            expiresAt: connectTokens.expiresAt,
+          })
+          .from(connectTokens)
+          .where(eq(connectTokens.token, rawToken));
+        if (byPlain) found = byPlain;
+      }
 
       if (!found) return null;
       if (found.expiresAt < new Date()) return null;
@@ -87,7 +106,9 @@ export async function authenticateMcp(
       const newExpiry = new Date(Date.now() + CONNECT_TOKEN_TTL_MS);
       db.update(connectTokens)
         .set({ lastUsedAt: new Date(), expiresAt: newExpiry })
-        .where(eq(connectTokens.token, rawToken))
+        .where(foundByHash
+          ? eq(connectTokens.tokenHash, tokenHash)
+          : eq(connectTokens.token, rawToken))
         .then(() => {})
         .catch(() => {});
 
@@ -99,7 +120,7 @@ export async function authenticateMcp(
       return null;
     }
 
-    const keyHash = await hashApiKey(rawToken);
+    const keyHash = hashApiKey(rawToken);
     const [found] = await db
       .select({ userId: apiKeys.userId, expiresAt: apiKeys.expiresAt })
       .from(apiKeys)

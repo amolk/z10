@@ -126,6 +126,8 @@ export const projects = pgTable("project", {
   }),
   // .z10.html content stored as text (simple for MVP; move to object store later)
   content: text("content"),
+  /** Last committed transaction ID — persisted for durable Lamport clock recovery. */
+  lastTxId: integer("last_tx_id").default(0).notNull(),
   thumbnail: text("thumbnail"),
   isPublic: boolean("is_public").default(false).notNull(),
   createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
@@ -165,8 +167,10 @@ export const connectTokens = pgTable(
     projectId: text("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
-    // Stored in plain text so it can be re-displayed anytime
-    token: text("token").notNull().unique(),
+    /** SHA-256 hash of the token — raw token shown only at creation time. */
+    tokenHash: text("token_hash").unique(),
+    /** @deprecated Plaintext token — drop in migration 0003. Use tokenHash. */
+    token: text("token").unique(),
     expiresAt: timestamp("expires_at", { mode: "date" }).notNull(),
     lastUsedAt: timestamp("last_used_at", { mode: "date" }),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),

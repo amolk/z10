@@ -37,24 +37,6 @@ export function LayersPanel() {
         backgroundColor: "var(--ed-panel-bg)",
       }}
     >
-      {/* Pages header */}
-      <div
-        className="flex items-center justify-between px-3 py-1.5 border-b"
-        style={{ borderColor: "var(--ed-section-border)" }}
-      >
-        <span className="text-[12px] font-medium" style={{ color: "var(--ed-text)" }}>
-          Pages
-        </span>
-        <button
-          onClick={addPage}
-          className="flex h-5 w-5 items-center justify-center rounded transition-colors"
-          style={{ color: "var(--ed-icon-color)" }}
-          title="Add page"
-        >
-          <Plus size={12} strokeWidth={1.5} />
-        </button>
-      </div>
-
       {/* Page list */}
       <PageList
         pages={layers}
@@ -63,6 +45,7 @@ export function LayersPanel() {
         onDeletePage={deletePage}
         onDuplicatePage={duplicatePage}
         onReorderPages={reorderPages}
+        onAddPage={addPage}
       />
 
       {/* Layers header + search */}
@@ -110,6 +93,7 @@ function PageList({
   onDeletePage,
   onDuplicatePage,
   onReorderPages,
+  onAddPage,
 }: {
   pages: LayerNode[];
   activePageId: string;
@@ -117,6 +101,7 @@ function PageList({
   onDeletePage: (id: string) => void;
   onDuplicatePage: (id: string) => void;
   onReorderPages: (from: number, to: number) => void;
+  onAddPage: () => void;
 }) {
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -277,6 +262,17 @@ function PageList({
         </div>
       ))}
 
+      {/* Add page button */}
+      <button
+        onClick={onAddPage}
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-[12px] transition-colors hover:bg-[var(--ed-hover-bg)]"
+        style={{ color: "var(--ed-text-tertiary)" }}
+        title="Add page"
+      >
+        <Plus size={12} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+        <span>Add page</span>
+      </button>
+
       {/* Context menu */}
       {contextMenu && (
         <div
@@ -329,7 +325,7 @@ type DropPosition = {
 
 // ─── Layer Row (recursive tree node with drag & drop) ───────
 
-function LayerRow({ node }: { node: LayerNode }) {
+export function LayerRow({ node }: { node: LayerNode }) {
   const {
     selectedIds,
     select,

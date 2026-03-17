@@ -22,29 +22,14 @@ import {
   getCanonicalDOM,
   getCanonicalHTML,
   getCurrentTxId,
-  configureCanonicalDOM,
 } from "@/lib/canonical-dom";
-
-// Ensure canonical DOM manager is configured with DB persistence
-let configured = false;
-function ensureConfigured() {
-  if (configured) return;
-  configured = true;
-  configureCanonicalDOM({
-    onPersist: async (projectId, html) => {
-      await db
-        .update(projects)
-        .set({ content: html, updatedAt: new Date() })
-        .where(eq(projects.id, projectId));
-    },
-  });
-}
+import { ensureCanonicalConfigured } from "@/lib/ensure-canonical-configured";
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
-  ensureConfigured();
+  ensureCanonicalConfigured();
 
   const authResult = await authenticateMcp(request);
   if (!authResult) {
@@ -57,12 +42,12 @@ export async function GET(
   // Get or load canonical DOM for this project
   const canonical = await getCanonicalDOM(projectId, async () => {
     const [project] = await db
-      .select({ content: projects.content })
+      .select({ content: projects.content, lastTxId: projects.lastTxId })
       .from(projects)
       .where(and(eq(projects.id, projectId), eq(projects.ownerId, userId)));
 
     if (!project) return null;
-    return project.content;
+    return { html: project.content ?? "", lastTxId: project.lastTxId };
   });
 
   if (!canonical) {
