@@ -13,23 +13,8 @@ export {
 } from './faker.js';
 
 export {
-  substituteTemplate,
-  expandInstance,
-  resolveProps,
-  instantiateTemplates,
-} from './template.js';
-export type { ExpandedInstance, InstantiationResult } from './template.js';
-
-export {
   generateClassBody,
 } from './web-components.js';
-
-export {
-  resolveEffectiveAttributes,
-  propagateToInstances,
-  isComponentInstance,
-  isComponentDefinition,
-} from '../core/component-registry.js';
 
 export {
   setPageMode,

@@ -14,7 +14,7 @@ import {
   findInstances,
   detachInstance,
 } from '../../src/core/document.js';
-import { propagateToInstances, resolveEffectiveAttributes } from '../../src/core/component-registry.js';
+import { ComponentRegistry } from '../../src/core/component-registry.js';
 import { generateClassBody } from '../../src/runtime/web-components.js';
 import {
   toTagName,
@@ -201,46 +201,62 @@ describe('detachInstance', () => {
 });
 
 // ---------------------------------------------------------------------------
-// resolveEffectiveAttributes
+// ComponentRegistry.resolveProps (was resolveEffectiveAttributes)
 // ---------------------------------------------------------------------------
 
-describe('resolveEffectiveAttributes', () => {
+describe('ComponentRegistry.resolveProps', () => {
   const schema = makeSchema();
 
   it('returns defaults when no variant or overrides', () => {
-    const result = resolveEffectiveAttributes(schema);
+    const doc = createDocument();
+    registerComponent(doc, schema);
+    const registry = new ComponentRegistry(doc);
+    const result = registry.resolveProps(schema);
     expect(result).toEqual({ label: 'Default', active: false });
   });
 
   it('applies variant props over defaults', () => {
-    const result = resolveEffectiveAttributes(schema, 'active');
+    const doc = createDocument();
+    registerComponent(doc, schema);
+    const registry = new ComponentRegistry(doc);
+    const result = registry.resolveProps(schema, 'active');
     expect(result).toEqual({ label: 'Active', active: true });
   });
 
   it('applies overrides over variant', () => {
-    const result = resolveEffectiveAttributes(schema, 'active', { label: 'Custom' });
+    const doc = createDocument();
+    registerComponent(doc, schema);
+    const registry = new ComponentRegistry(doc);
+    const result = registry.resolveProps(schema, 'active', { label: 'Custom' });
     expect(result).toEqual({ label: 'Custom', active: true });
   });
 
   it('applies overrides over defaults (no variant)', () => {
-    const result = resolveEffectiveAttributes(schema, undefined, { active: true });
+    const doc = createDocument();
+    registerComponent(doc, schema);
+    const registry = new ComponentRegistry(doc);
+    const result = registry.resolveProps(schema, undefined, { active: true });
     expect(result).toEqual({ label: 'Default', active: true });
   });
 
   it('ignores unknown variant names', () => {
-    const result = resolveEffectiveAttributes(schema, 'nonexistent');
+    const doc = createDocument();
+    registerComponent(doc, schema);
+    const registry = new ComponentRegistry(doc);
+    const result = registry.resolveProps(schema, 'nonexistent');
     expect(result).toEqual({ label: 'Default', active: false });
   });
 });
 
 // ---------------------------------------------------------------------------
-// propagateToInstances
+// ComponentRegistry.propagate (was propagateToInstances)
 // ---------------------------------------------------------------------------
 
-describe('propagateToInstances', () => {
+describe('ComponentRegistry.propagate', () => {
   it('updates non-overridden props on instances', () => {
     const doc = createDocument();
     registerComponent(doc, makeSchema());
+    const registry = new ComponentRegistry(doc);
 
     const instance = createNode({
       id: 'i1',
@@ -250,7 +266,7 @@ describe('propagateToInstances', () => {
     });
     addNode(doc, instance);
 
-    const updated = propagateToInstances(doc, 'TestCard');
+    const updated = registry.propagate('TestCard');
     expect(updated).toEqual(['i1']);
 
     // 'label' is overridden — should not be changed
@@ -264,6 +280,7 @@ describe('propagateToInstances', () => {
   it('applies variant + non-overridden props', () => {
     const doc = createDocument();
     registerComponent(doc, makeSchema());
+    const registry = new ComponentRegistry(doc);
 
     const instance = createNode({
       id: 'i1',
@@ -274,7 +291,7 @@ describe('propagateToInstances', () => {
     });
     addNode(doc, instance);
 
-    propagateToInstances(doc, 'TestCard');
+    registry.propagate('TestCard');
     const node = doc.nodes.get('i1')!;
     // active is from variant (true), not overridden → should be set
     expect(node.componentProps?.active).toBe(true);
@@ -284,7 +301,8 @@ describe('propagateToInstances', () => {
 
   it('returns empty for unknown component', () => {
     const doc = createDocument();
-    expect(propagateToInstances(doc, 'Unknown')).toEqual([]);
+    const registry = new ComponentRegistry(doc);
+    expect(registry.propagate('Unknown')).toEqual([]);
   });
 });
 

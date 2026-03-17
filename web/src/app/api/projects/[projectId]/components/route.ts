@@ -18,7 +18,7 @@ import {
   createDocumentWithPage,
   serializeZ10Html,
   toTagName,
-  ComponentRegistry,
+  createRegistry,
   generateClassBody,
 } from "z10";
 import type { ComponentSchema } from "z10";
@@ -123,7 +123,7 @@ export async function GET(
   const verbose = url.searchParams.get("verbose") === "true";
 
   if (verbose) {
-    const registry = new ComponentRegistry(doc);
+    const registry = createRegistry(doc);
     const components: Array<{
       name: string;
       tagName: string;
@@ -223,7 +223,7 @@ export async function POST(
   schema.classBody = generateClassBody(schema);
 
   // Register in the document via registry
-  const registry = new ComponentRegistry(doc);
+  const registry = createRegistry(doc);
   registry.register(schema);
 
   // Update head through canonical DOM (preserves body state)

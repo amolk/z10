@@ -3,11 +3,6 @@ export * from './document.js';
 export * from './config.js';
 export {
   ComponentRegistry,
-  substituteTemplate as substituteTemplateSimple,
-  resolveEffectiveAttributes,
-  isComponentInstance,
-  isComponentDefinition,
-  propagateToInstances,
 } from './component-registry.js';
 export type {
   ResolvedInstance,
@@ -15,3 +10,8 @@ export type {
   ExpansionError,
   SubstituteFn,
 } from './component-registry.js';
+export {
+  createRegistry,
+  createSimpleRegistry,
+  substituteTemplate,
+} from './component-factory.js';

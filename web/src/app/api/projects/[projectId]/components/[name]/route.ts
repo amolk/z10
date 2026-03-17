@@ -18,7 +18,7 @@ import {
   createDocumentWithPage,
   serializeZ10Html,
   toTagName,
-  ComponentRegistry,
+  createRegistry,
   generateClassBody,
 } from "z10";
 import type { ComponentSchema, Z10Document } from "z10";
@@ -125,7 +125,7 @@ export async function GET(request: Request, { params }: RouteParams) {
 
   const { doc, name } = result;
 
-  const registry = new ComponentRegistry(doc);
+  const registry = createRegistry(doc);
   const schema = registry.get(name);
   if (!schema) {
     return NextResponse.json(
@@ -161,7 +161,7 @@ export async function PUT(request: Request, { params }: RouteParams) {
 
   const { doc, projectId, name } = result;
 
-  const registry = new ComponentRegistry(doc);
+  const registry = createRegistry(doc);
   const existing = registry.get(name);
   if (!existing) {
     return NextResponse.json(
@@ -219,7 +219,7 @@ export async function DELETE(request: Request, { params }: RouteParams) {
 
   const { doc, projectId, name } = result;
 
-  const registry = new ComponentRegistry(doc);
+  const registry = createRegistry(doc);
   const schema = registry.get(name);
   if (!schema) {
     return NextResponse.json(

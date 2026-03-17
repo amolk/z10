@@ -13,7 +13,7 @@ import type {
   NodeEditor,
   GovernanceLevel,
 } from './types.js';
-import { ComponentRegistry } from './component-registry.js';
+import { createSimpleRegistry } from './component-factory.js';
 
 /** Default project configuration */
 function defaultConfig(): ProjectConfig {
@@ -264,25 +264,25 @@ export function getComponent(doc: Z10Document, name: string): ComponentSchema | 
 /** Validate and register a ComponentSchema, auto-generating tagName/classBody if missing.
  *  Throws if the component name is not valid PascalCase (e.g. "MetricCard"). */
 export function registerComponent(doc: Z10Document, schema: ComponentSchema): void {
-  const registry = new ComponentRegistry(doc);
+  const registry = createSimpleRegistry(doc);
   registry.register(schema);
 }
 
 /** Remove a component schema by name. Returns true if it existed. */
 export function unregisterComponent(doc: Z10Document, name: string): boolean {
-  const registry = new ComponentRegistry(doc);
+  const registry = createSimpleRegistry(doc);
   return registry.unregister(name);
 }
 
 /** Return all nodes whose tag matches the component's tagName (starts with z10-) */
 export function findInstances(doc: Z10Document, componentName: string): Z10Node[] {
-  const registry = new ComponentRegistry(doc);
+  const registry = createSimpleRegistry(doc);
   return registry.instances(componentName);
 }
 
 /** Replace a custom element node with a plain <div>, preserving attributes/styles but removing component association */
 export function detachInstance(doc: Z10Document, instanceId: NodeId): Z10Node | undefined {
-  const registry = new ComponentRegistry(doc);
+  const registry = createSimpleRegistry(doc);
   return registry.detach(instanceId);
 }
 
