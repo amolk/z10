@@ -14,8 +14,7 @@ import {
   findInstances,
   detachInstance,
 } from '../../src/core/document.js';
-import { propagateToInstances } from '../../src/core/propagation.js';
-import { resolveEffectiveAttributes } from '../../src/runtime/template.js';
+import { propagateToInstances, resolveEffectiveAttributes } from '../../src/core/component-registry.js';
 import { generateClassBody } from '../../src/runtime/web-components.js';
 import {
   toTagName,

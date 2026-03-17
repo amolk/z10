@@ -18,12 +18,8 @@ import {
   createDocumentWithPage,
   serializeZ10Html,
   toTagName,
-  registerComponent,
-  unregisterComponent,
-  findInstances,
-  detachInstance,
+  ComponentRegistry,
   generateClassBody,
-  propagateToInstances,
 } from "z10";
 import type { ComponentSchema, Z10Document } from "z10";
 import {
@@ -129,7 +125,8 @@ export async function GET(request: Request, { params }: RouteParams) {
 
   const { doc, name } = result;
 
-  const schema = doc.components.get(name);
+  const registry = new ComponentRegistry(doc);
+  const schema = registry.get(name);
   if (!schema) {
     return NextResponse.json(
       { error: `Component '${name}' not found` },
@@ -137,7 +134,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     );
   }
 
-  const instances = findInstances(doc, name);
+  const instances = registry.instances(name);
 
   return NextResponse.json({
     name: schema.name,
@@ -164,7 +161,8 @@ export async function PUT(request: Request, { params }: RouteParams) {
 
   const { doc, projectId, name } = result;
 
-  const existing = doc.components.get(name);
+  const registry = new ComponentRegistry(doc);
+  const existing = registry.get(name);
   if (!existing) {
     return NextResponse.json(
       { error: `Component '${name}' not found` },
@@ -200,10 +198,8 @@ export async function PUT(request: Request, { params }: RouteParams) {
   // Regenerate the class body from the updated schema
   updated.classBody = generateClassBody(updated);
 
-  registerComponent(doc, updated);
-
-  // Propagate changes to all instances (non-overridden attrs reset to new defaults)
-  propagateToInstances(doc, name);
+  // register() auto-propagates to all instances
+  registry.register(updated);
 
   await applyHeadUpdate(projectId, doc);
 
@@ -223,7 +219,8 @@ export async function DELETE(request: Request, { params }: RouteParams) {
 
   const { doc, projectId, name } = result;
 
-  const schema = doc.components.get(name);
+  const registry = new ComponentRegistry(doc);
+  const schema = registry.get(name);
   if (!schema) {
     return NextResponse.json(
       { error: `Component '${name}' not found` },
@@ -234,16 +231,15 @@ export async function DELETE(request: Request, { params }: RouteParams) {
   const url = new URL(request.url);
   const detach = url.searchParams.get("detach") === "true";
 
-  const instances = findInstances(doc, name);
+  const instances = registry.instances(name);
 
   if (detach) {
-    // Convert all instances to plain <div> elements
     for (const instance of instances) {
-      detachInstance(doc, instance.id);
+      registry.detach(instance.id);
     }
   }
 
-  unregisterComponent(doc, name);
+  registry.unregister(name);
 
   await applyHeadUpdate(projectId, doc);
 

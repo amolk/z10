@@ -26,13 +26,10 @@ export {
 
 export {
   resolveEffectiveAttributes,
-} from './template.js';
-
-export {
   propagateToInstances,
   isComponentInstance,
   isComponentDefinition,
-} from '../core/propagation.js';
+} from '../core/component-registry.js';
 
 export {
   setPageMode,

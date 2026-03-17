@@ -18,8 +18,7 @@ import {
   createDocumentWithPage,
   serializeZ10Html,
   toTagName,
-  registerComponent,
-  findInstances,
+  ComponentRegistry,
   generateClassBody,
 } from "z10";
 import type { ComponentSchema } from "z10";
@@ -124,6 +123,7 @@ export async function GET(
   const verbose = url.searchParams.get("verbose") === "true";
 
   if (verbose) {
+    const registry = new ComponentRegistry(doc);
     const components: Array<{
       name: string;
       tagName: string;
@@ -136,8 +136,8 @@ export async function GET(
       instanceCount: number;
     }> = [];
 
-    for (const [, schema] of doc.components) {
-      const instances = findInstances(doc, schema.name);
+    for (const schema of registry.schemas()) {
+      const instances = registry.instances(schema.name);
       components.push({
         name: schema.name,
         tagName: schema.tagName,
@@ -222,8 +222,9 @@ export async function POST(
   // Generate the class body from the schema
   schema.classBody = generateClassBody(schema);
 
-  // Register in the document
-  registerComponent(doc, schema);
+  // Register in the document via registry
+  const registry = new ComponentRegistry(doc);
+  registry.register(schema);
 
   // Update head through canonical DOM (preserves body state)
   await applyHeadUpdate(projectId, doc);

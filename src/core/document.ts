@@ -13,8 +13,7 @@ import type {
   NodeEditor,
   GovernanceLevel,
 } from './types.js';
-import { toTagName } from './types.js';
-import { propagateToInstances } from './propagation.js';
+import { ComponentRegistry } from './component-registry.js';
 
 /** Default project configuration */
 function defaultConfig(): ProjectConfig {
@@ -249,10 +248,10 @@ export function getToken(doc: Z10Document, name: string): DesignToken | undefine
 }
 
 // ---------------------------------------------------------------------------
-// Component Operations
+// Component Operations — forwarding shims to ComponentRegistry
 // ---------------------------------------------------------------------------
 
-/** Register a component schema */
+/** Register a component schema (low-level, no validation) */
 export function setComponent(doc: Z10Document, schema: ComponentSchema): void {
   doc.components.set(schema.name, schema);
 }
@@ -265,53 +264,26 @@ export function getComponent(doc: Z10Document, name: string): ComponentSchema | 
 /** Validate and register a ComponentSchema, auto-generating tagName/classBody if missing.
  *  Throws if the component name is not valid PascalCase (e.g. "MetricCard"). */
 export function registerComponent(doc: Z10Document, schema: ComponentSchema): void {
-  if (!schema.name || !/^[A-Z][A-Za-z0-9]*$/.test(schema.name)) {
-    throw new Error(
-      `Invalid component name "${schema.name}". Must be PascalCase starting with an uppercase letter (e.g. "MetricCard").`
-    );
-  }
-  const resolved: ComponentSchema = {
-    ...schema,
-    tagName: schema.tagName || toTagName(schema.name),
-    classBody: schema.classBody ?? '',
-  };
-  doc.components.set(resolved.name, resolved);
-  // Propagate updated defaults to existing instances
-  propagateToInstances(doc, resolved.name);
+  const registry = new ComponentRegistry(doc);
+  registry.register(schema);
 }
 
 /** Remove a component schema by name. Returns true if it existed. */
 export function unregisterComponent(doc: Z10Document, name: string): boolean {
-  return doc.components.delete(name);
+  const registry = new ComponentRegistry(doc);
+  return registry.unregister(name);
 }
 
 /** Return all nodes whose tag matches the component's tagName (starts with z10-) */
 export function findInstances(doc: Z10Document, componentName: string): Z10Node[] {
-  const schema = doc.components.get(componentName);
-  if (!schema) return [];
-  const tag = schema.tagName;
-  const result: Z10Node[] = [];
-  doc.nodes.forEach((node) => {
-    if (node.tag === tag) {
-      result.push(node);
-    }
-  });
-  return result;
+  const registry = new ComponentRegistry(doc);
+  return registry.instances(componentName);
 }
 
 /** Replace a custom element node with a plain <div>, preserving attributes/styles but removing component association */
 export function detachInstance(doc: Z10Document, instanceId: NodeId): Z10Node | undefined {
-  const node = doc.nodes.get(instanceId);
-  if (!node) return undefined;
-
-  node.tag = 'div';
-  node.componentName = undefined;
-  node.componentProps = undefined;
-  node.componentDef = undefined;
-  node.componentOverrides = undefined;
-  node.componentVariant = undefined;
-
-  return node;
+  const registry = new ComponentRegistry(doc);
+  return registry.detach(instanceId);
 }
 
 // ---------------------------------------------------------------------------
