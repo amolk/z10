@@ -13,7 +13,7 @@
 
 import { LocalProxy } from '../dom/proxy.js';
 import { PatchStream, type PatchStreamOptions } from './patch-stream.js';
-import { fetchSync, getConnectionInfo } from './api.js';
+import { Z10Client } from './z10-client.js';
 
 export interface ProjectConnectionOptions {
   /** Project ID to connect to. */
@@ -53,14 +53,16 @@ export class ProjectConnection {
    * and subscribe to the SSE patch stream.
    */
   async connect(): Promise<void> {
+    const client = await Z10Client.create();
+
     // Step 1: Fetch initial sync (full DOM + txId) from server
-    const sync = await fetchSync(this.projectId);
+    const sync = await client.fetchSync(this.projectId);
 
     // Step 2: Load into LocalProxy
     this.proxy.loadDocument(sync.html, sync.txId);
 
     // Step 3: Subscribe to patch stream
-    const connInfo = await getConnectionInfo();
+    const connInfo = client.getConnectionInfo();
 
     const streamOpts: PatchStreamOptions = {
       baseUrl: connInfo.baseUrl,
@@ -91,7 +93,8 @@ export class ProjectConnection {
    * Used when gap is too large or state is inconsistent.
    */
   async resync(): Promise<void> {
-    const sync = await fetchSync(this.projectId);
+    const client = await Z10Client.create();
+    const sync = await client.fetchSync(this.projectId);
     this.proxy.loadDocument(sync.html, sync.txId);
     this.options.onResync?.(sync.txId);
   }

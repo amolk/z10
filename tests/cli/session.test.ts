@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { readFile, rm, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { extractFlag, resolvePageId } from '../../src/cli/session.js';
+import { extractFlag, resolvePageId } from '../../src/cli/flags.js';
 import type { SessionState } from '../../src/cli/session.js';
 
 // We test the core logic by importing the functions and mocking the paths

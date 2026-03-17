@@ -10,21 +10,16 @@
  *   z10 component delete <name> [--detach]  Remove definition
  */
 
-import { loadSession, resolveProjectId } from './session.js';
-import {
-  fetchComponentDetail,
-  fetchComponentList,
-  createComponent,
-  updateComponent,
-  deleteComponent,
-} from './api.js';
+import { loadSession } from './session.js';
+import { resolveProjectId } from './flags.js';
+import { Z10Client } from './z10-client.js';
 
 /** Extract positional args from args, stripping known flags and --key value pairs. */
 function extractPositionalArgs(args: string[]): string[] {
   const result: string[] = [];
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--project') { i++; continue; } // skip --project and its value
-    if (args[i]!.startsWith('--')) continue; // skip all flags
+    if (args[i] === '--project') { i++; continue; }
+    if (args[i]!.startsWith('--')) continue;
     result.push(args[i]!);
   }
   return result;
@@ -34,31 +29,31 @@ export async function cmdComponent(args: string[]): Promise<void> {
   const sub = args[0];
   const session = await loadSession();
   const projectId = resolveProjectId(args.slice(1), session);
+  const client = await Z10Client.create();
 
   if (!projectId) {
     console.error('No project context. Run `z10 project load <id>` or pass --project <id>.');
     process.exit(1);
   }
 
-  // Extract positional args after the subcommand, ignoring flags
   const positional = extractPositionalArgs(args.slice(1));
   const nameArg = positional[0] ?? '';
 
   switch (sub) {
     case 'list':
-      await cmdList(projectId, args.includes('--verbose'));
+      await cmdList(client, projectId, args.includes('--verbose'));
       break;
     case 'show':
-      await cmdShow(projectId, nameArg);
+      await cmdShow(client, projectId, nameArg);
       break;
     case 'create':
-      await cmdCreate(projectId, nameArg);
+      await cmdCreate(client, projectId, nameArg);
       break;
     case 'edit':
-      await cmdEdit(projectId, nameArg);
+      await cmdEdit(client, projectId, nameArg);
       break;
     case 'delete':
-      await cmdDelete(projectId, nameArg, args.includes('--detach'));
+      await cmdDelete(client, projectId, nameArg, args.includes('--detach'));
       break;
     default:
       console.error(`Usage: z10 component <list|show|create|edit|delete> [name] [flags]
@@ -71,8 +66,8 @@ export async function cmdComponent(args: string[]): Promise<void> {
   }
 }
 
-async function cmdList(projectId: string, verbose: boolean): Promise<void> {
-  const result = await fetchComponentList(projectId, verbose);
+async function cmdList(client: Z10Client, projectId: string, verbose: boolean): Promise<void> {
+  const result = await client.fetchComponentList(projectId, verbose);
   if (verbose) {
     console.log(JSON.stringify(result, null, 2));
   } else {
@@ -86,16 +81,16 @@ async function cmdList(projectId: string, verbose: boolean): Promise<void> {
   }
 }
 
-async function cmdShow(projectId: string, name: string): Promise<void> {
+async function cmdShow(client: Z10Client, projectId: string, name: string): Promise<void> {
   if (!name) {
     console.error('Usage: z10 component show <name>');
     process.exit(1);
   }
-  const detail = await fetchComponentDetail(projectId, name);
+  const detail = await client.fetchComponentDetail(projectId, name);
   console.log(JSON.stringify(detail, null, 2));
 }
 
-async function cmdCreate(projectId: string, name: string): Promise<void> {
+async function cmdCreate(client: Z10Client, projectId: string, name: string): Promise<void> {
   if (!name) {
     console.error('Usage: z10 component create <name>');
     console.error('Reads component definition JSON from stdin.');
@@ -112,14 +107,14 @@ async function cmdCreate(projectId: string, name: string): Promise<void> {
     return;
   }
 
-  const result = await createComponent(projectId, name, definition);
+  const result = await client.createComponent(projectId, name, definition);
   console.log(`Component "${name}" created.`);
   if (result.tagName) {
     console.log(`Tag: <${result.tagName}>`);
   }
 }
 
-async function cmdEdit(projectId: string, name: string): Promise<void> {
+async function cmdEdit(client: Z10Client, projectId: string, name: string): Promise<void> {
   if (!name) {
     console.error('Usage: z10 component edit <name>');
     console.error('Reads partial component definition JSON from stdin.');
@@ -136,17 +131,17 @@ async function cmdEdit(projectId: string, name: string): Promise<void> {
     return;
   }
 
-  await updateComponent(projectId, name, definition);
+  await client.updateComponent(projectId, name, definition);
   console.log(`Component "${name}" updated.`);
 }
 
-async function cmdDelete(projectId: string, name: string, detach: boolean): Promise<void> {
+async function cmdDelete(client: Z10Client, projectId: string, name: string, detach: boolean): Promise<void> {
   if (!name) {
     console.error('Usage: z10 component delete <name> [--detach]');
     process.exit(1);
   }
 
-  await deleteComponent(projectId, name, detach);
+  await client.deleteComponent(projectId, name, detach);
   console.log(`Component "${name}" deleted.${detach ? ' Instances detached.' : ''}`);
 }
 
@@ -162,4 +157,3 @@ function readStdin(): Promise<string> {
     process.stdin.on('error', reject);
   });
 }
-

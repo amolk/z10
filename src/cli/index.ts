@@ -39,7 +39,7 @@ import { exportReact } from '../export/react.js';
 import { exportVue } from '../export/vue.js';
 import { exportSvelte } from '../export/svelte.js';
 import { exportWebComponents } from '../export/web-components.js';
-import { cmdLogin, cmdLogout, cmdProjectLoad, cmdProjectList, cmdPageLoad, cmdPageList, cmdComponents, cmdTokens as cmdTokensList } from './commands.js';
+import { cmdLogin, cmdLogout, cmdProjectLoad, cmdProjectList, cmdPageLoad, cmdPageList, cmdComponents, cmdTokens } from './commands.js';
 import { cmdExec } from './exec.js';
 import { cmdDom } from './dom.js';
 import { cmdComponent } from './component.js';
@@ -87,7 +87,7 @@ async function main(): Promise<void> {
       if (args[1] === 'load') {
         await cmdProjectLoad(args.slice(2));
       } else if (args[1] === 'list') {
-        await cmdProjectList();
+        await cmdProjectList([]);
       } else {
         console.error('Usage: z10 project <list|load <project-id>>');
         process.exit(1);
@@ -120,7 +120,7 @@ async function main(): Promise<void> {
       await cmdComponents(args.slice(1));
       break;
     case 'tokens':
-      await cmdTokensList(args.slice(1));
+      await cmdTokens(args.slice(1));
       break;
     case '--help':
     case '-h':

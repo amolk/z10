@@ -8,10 +8,9 @@
  */
 
 import { Window, type HTMLElement as HappyElement } from 'happy-dom';
-import { loadSession, saveDomCache, resolvePageId, rejectUnknownFlags } from './session.js';
-import { loadDomCache, extractFlag } from './session.js';
-import { fetchDom } from './api.js';
-import { resolveProjectId } from './session.js';
+import { loadSession, saveDomCache, loadDomCache } from './session.js';
+import { extractFlag, rejectUnknownFlags, resolvePageId } from './flags.js';
+import { Z10Client } from './z10-client.js';
 
 /** Tags to skip in tree/full output */
 const SKIP_TAGS = new Set(['SCRIPT', 'STYLE']);
@@ -35,9 +34,6 @@ function parseAndGetRoot(html: string, pageId?: string): HappyElement | null {
 
 /**
  * Extract a single page's inner HTML from full project content by its root node ID.
- * Returns only the children of the page div — since document.body maps to the
- * page root in the exec environment, the agent should see its contents, not the
- * page element itself.
  */
 function extractPageInner(html: string, pageId: string): string {
   const root = parseAndGetRoot(html, pageId);
@@ -52,8 +48,6 @@ export function compactTreeView(html: string, pageId?: string): string {
   const root = parseAndGetRoot(html, pageId);
   if (!root) return '';
 
-  // When a page is scoped, show children of the page root.
-  // Otherwise show children of body (skipping script/style).
   const children = Array.from(root.children) as HappyElement[];
   const startNodes = pageId
     ? children
@@ -104,15 +98,14 @@ export async function cmdDom(args: string[]): Promise<void> {
   const offline = args.includes('--offline');
   const session = await loadSession();
 
-  // Resolve project/page from flags or session
   const projectIdFromFlag = extractFlag(args, '--project');
   const projectId = projectIdFromFlag ?? session.currentProjectId;
   const pageId = resolvePageId(args, session);
 
   if (!offline && projectId) {
-    // Online mode: fetch full DOM for caching, then filter to current page for display
     try {
-      const raw = await fetchDom(projectId);
+      const client = await Z10Client.create();
+      const raw = await client.fetchDom(projectId);
 
       await saveDomCache(raw.html);
 
@@ -126,7 +119,6 @@ export async function cmdDom(args: string[]): Promise<void> {
       }
       return;
     } catch (err) {
-      // Fallback to cache if server unavailable
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`Server unavailable (${msg}), using cached DOM`);
     }

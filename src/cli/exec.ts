@@ -8,8 +8,9 @@
  * 4. Fetch fresh DOM to display post-commit state
  */
 
-import { loadSession, resolvePageId, extractFlag, rejectUnknownFlags } from './session.js';
-import { transact, fetchDom } from './api.js';
+import { loadSession } from './session.js';
+import { extractFlag, rejectUnknownFlags, resolvePageId } from './flags.js';
+import { Z10Client } from './z10-client.js';
 
 // ── Retry with backoff (E2) ──
 
@@ -21,7 +22,7 @@ export interface RetryOptions {
   jitterMs: number;
 }
 
-const DEFAULT_RETRY: RetryOptions = {
+export const DEFAULT_RETRY: RetryOptions = {
   maxAttempts: 5,
   baseDelayMs: 100,
   maxDelayMs: 5_000,
@@ -47,6 +48,7 @@ export function computeRetryDelay(attempt: number, opts: RetryOptions): number {
 export async function cmdExec(args: string[]): Promise<void> {
   rejectUnknownFlags(args, ['--project', '--page']);
   const session = await loadSession();
+  const client = await Z10Client.create();
 
   // Resolve project/page from flags or session
   const projectIdFromFlag = extractFlag(args, '--project');
@@ -75,11 +77,11 @@ export async function cmdExec(args: string[]): Promise<void> {
 
   // Send code to server for execution against canonical DOM
   const subtreeRootNid = pageId ?? undefined;
-  const result = await transact(projectId, source, subtreeRootNid);
+  const result = await client.transact(projectId, source, subtreeRootNid);
 
   if (result.status === 'committed') {
     // Fetch fresh DOM to show the updated state
-    const dom = await fetchDom(projectId);
+    const dom = await client.fetchDom(projectId);
     console.log(`✓ Executed (txId: ${result.txId})`);
     console.log(dom.html);
   } else {

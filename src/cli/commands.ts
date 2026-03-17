@@ -1,19 +1,15 @@
 /**
  * CLI commands for agent scripting workflow.
  *
- * Commands: login, project load, page load, components, tokens
+ * Commands: login, logout, project load/list, page load/list, components, tokens
  */
 
-import { loadSession, updateSession, clearSession, requireSession, resolveProjectId, resolvePageId, rejectUnknownFlags } from './session.js';
-import { fetchComponents, fetchTokens, fetchDom, fetchProjects, fetchPages } from './api.js';
-import { saveDomCache } from './session.js';
+import { updateSession, clearSession, requireSession, saveDomCache, loadSession } from './session.js';
+import { rejectUnknownFlags } from './flags.js';
+import { withProject, withSession } from './command-context.js';
 
 /**
  * z10 login — Authenticate with z10 server.
- *
- * Usage:
- *   z10 login --token <api-token>
- *   z10 login --server <url> --token <api-token>
  */
 export async function cmdLogin(args: string[]): Promise<void> {
   rejectUnknownFlags(args, ['--token', '--server']);
@@ -48,12 +44,9 @@ export async function cmdLogout(): Promise<void> {
 
 /**
  * z10 project load <project-id> — Set current project context.
- *
- * Fetches the project's DOM and caches it locally.
  */
 export async function cmdProjectLoad(args: string[]): Promise<void> {
   const projectId = args[0];
-
   if (!projectId) {
     console.error('Usage: z10 project load <project-id>');
     process.exit(1);
@@ -61,9 +54,10 @@ export async function cmdProjectLoad(args: string[]): Promise<void> {
 
   await updateSession({ currentProjectId: projectId, currentPageId: undefined });
 
-  // Try to fetch and cache DOM
   try {
-    const result = await fetchDom(projectId);
+    const { Z10Client } = await import('./z10-client.js');
+    const client = await Z10Client.create();
+    const result = await client.fetchDom(projectId);
     await saveDomCache(result.html);
     console.log(`✓ Project loaded: ${projectId}`);
   } catch {
@@ -73,55 +67,39 @@ export async function cmdProjectLoad(args: string[]): Promise<void> {
 }
 
 /**
- * z10 project list — List all projects in the logged-in account.
+ * z10 project list — List all projects.
  */
-export async function cmdProjectList(): Promise<void> {
-  try {
-    const projectList = await fetchProjects();
+export const cmdProjectList = withSession(async (ctx) => {
+  const projectList = await ctx.client.fetchProjects();
 
-    if (projectList.length === 0) {
-      console.log('No projects found.');
-      return;
-    }
-
-    console.log('Projects:');
-    for (const p of projectList) {
-      const updated = p.updatedAt ? `  (updated ${p.updatedAt})` : '';
-      console.log(`  ${p.id}  ${p.name}${updated}`);
-    }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`Failed to list projects: ${msg}`);
-    process.exit(1);
+  if (projectList.length === 0) {
+    console.log('No projects found.');
+    return;
   }
-}
+
+  console.log('Projects:');
+  for (const p of projectList) {
+    const updated = p.updatedAt ? `  (updated ${p.updatedAt})` : '';
+    console.log(`  ${p.id}  ${p.name}${updated}`);
+  }
+});
 
 /**
  * z10 page list [--project <id>] — List pages in the current project.
  */
-export async function cmdPageList(args: string[] = []): Promise<void> {
-  rejectUnknownFlags(args, ['--project']);
-  const session = await loadSession();
-  const projectId = resolveProjectId(args, session);
+export const cmdPageList = withProject(async (ctx) => {
+  const pages = await ctx.client.fetchPages(ctx.projectId);
 
-  try {
-    const pages = await fetchPages(projectId);
-
-    if (pages.length === 0) {
-      console.log('No pages found.');
-      return;
-    }
-
-    console.log('Pages:');
-    for (const p of pages) {
-      console.log(`  ${p.rootNodeId}  ${p.name}  (${p.mode})`);
-    }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`Failed to list pages: ${msg}`);
-    process.exit(1);
+  if (pages.length === 0) {
+    console.log('No pages found.');
+    return;
   }
-}
+
+  console.log('Pages:');
+  for (const p of pages) {
+    console.log(`  ${p.rootNodeId}  ${p.name}  (${p.mode})`);
+  }
+});
 
 /**
  * z10 page load <page-id> — Set current page context.
@@ -138,9 +116,10 @@ export async function cmdPageLoad(args: string[]): Promise<void> {
 
   await updateSession({ currentPageId: pageId });
 
-  // Refresh DOM for the new page
   try {
-    const result = await fetchDom(session.currentProjectId!, { pageId });
+    const { Z10Client } = await import('./z10-client.js');
+    const client = await Z10Client.create();
+    const result = await client.fetchDom(session.currentProjectId!, { pageId });
     await saveDomCache(result.html);
     console.log(`✓ Page loaded: ${pageId}`);
   } catch {
@@ -152,66 +131,46 @@ export async function cmdPageLoad(args: string[]): Promise<void> {
 /**
  * z10 components [--project <id>] — List registered Web Components.
  */
-export async function cmdComponents(args: string[]): Promise<void> {
-  rejectUnknownFlags(args, ['--project']);
-  const session = await loadSession();
-  const projectId = resolveProjectId(args, session);
+export const cmdComponents = withProject(async (ctx) => {
+  const components = await ctx.client.fetchComponents(ctx.projectId);
 
-  try {
-    const components = await fetchComponents(projectId);
-
-    if (components.length === 0) {
-      console.log('No components registered.');
-      return;
-    }
-
-    console.log('Components:');
-    for (const name of components) {
-      console.log(`  ${name}`);
-    }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`Failed to fetch components: ${msg}`);
-    process.exit(1);
+  if (components.length === 0) {
+    console.log('No components registered.');
+    return;
   }
-}
+
+  console.log('Components:');
+  for (const name of components) {
+    console.log(`  ${name}`);
+  }
+});
 
 /**
  * z10 tokens [--project <id>] — List design tokens.
  */
-export async function cmdTokens(args: string[]): Promise<void> {
-  rejectUnknownFlags(args, ['--project']);
-  const session = await loadSession();
-  const projectId = resolveProjectId(args, session);
+export const cmdTokens = withProject(async (ctx) => {
+  const tokens = await ctx.client.fetchTokens(ctx.projectId);
 
-  try {
-    const tokens = await fetchTokens(projectId);
+  const primCount = Object.keys(tokens.primitives).length;
+  const semCount = Object.keys(tokens.semantic).length;
 
-    const primCount = Object.keys(tokens.primitives).length;
-    const semCount = Object.keys(tokens.semantic).length;
-
-    if (primCount === 0 && semCount === 0) {
-      console.log('No tokens defined.');
-      return;
-    }
-
-    if (primCount > 0) {
-      console.log('Primitives:');
-      for (const [key, value] of Object.entries(tokens.primitives)) {
-        console.log(`  ${key}: ${value}`);
-      }
-    }
-
-    if (semCount > 0) {
-      if (primCount > 0) console.log('');
-      console.log('Semantic:');
-      for (const [key, value] of Object.entries(tokens.semantic)) {
-        console.log(`  ${key}: ${value}`);
-      }
-    }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`Failed to fetch tokens: ${msg}`);
-    process.exit(1);
+  if (primCount === 0 && semCount === 0) {
+    console.log('No tokens defined.');
+    return;
   }
-}
+
+  if (primCount > 0) {
+    console.log('Primitives:');
+    for (const [key, value] of Object.entries(tokens.primitives)) {
+      console.log(`  ${key}: ${value}`);
+    }
+  }
+
+  if (semCount > 0) {
+    if (primCount > 0) console.log('');
+    console.log('Semantic:');
+    for (const [key, value] of Object.entries(tokens.semantic)) {
+      console.log(`  ${key}: ${value}`);
+    }
+  }
+});
