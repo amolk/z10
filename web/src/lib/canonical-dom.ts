@@ -57,8 +57,10 @@ export interface CanonicalDOMOptions {
   cleanupIntervalMs?: number;
   /** Ring buffer capacity per project. Default: 1000 patches. */
   ringBufferCapacity?: number;
-  /** Persist callback: called when canonical DOM should be saved to DB. */
+  /** Persist callback: called when canonical DOM should be saved to DB (full HTML + txId). */
   onPersist?: (projectId: string, html: string, txId: number) => Promise<void>;
+  /** Lightweight persist callback: updates only the txId in DB (no full HTML write). */
+  onPersistTxId?: (projectId: string, txId: number) => Promise<void>;
   /** Number of commits before auto-persist. Default: 10. */
   persistEveryNCommits?: number;
   /** Interval in ms for periodic persistence of all dirty instances. Default: 60s. 0 to disable. */
@@ -106,7 +108,7 @@ export function configureCanonicalDOM(options: CanonicalDOMOptions): void {
  */
 export async function getCanonicalDOM(
   projectId: string,
-  loadContent: () => Promise<string | null>,
+  loadContent: () => Promise<string | { html: string; lastTxId: number } | null>,
 ): Promise<CanonicalDOM> {
   const existing = instances.get(projectId);
   if (existing) {
@@ -115,8 +117,14 @@ export async function getCanonicalDOM(
   }
 
   // Load content from DB
-  const html = await loadContent();
-  return loadCanonicalDOM(projectId, html ?? "");
+  const loaded = await loadContent();
+  if (loaded === null || loaded === undefined) {
+    return loadCanonicalDOM(projectId, "", 0);
+  }
+  if (typeof loaded === "string") {
+    return loadCanonicalDOM(projectId, loaded, 0);
+  }
+  return loadCanonicalDOM(projectId, loaded.html, loaded.lastTxId);
 }
 
 /**
@@ -126,6 +134,7 @@ export async function getCanonicalDOM(
 export function loadCanonicalDOM(
   projectId: string,
   html: string,
+  dbTxId: number = 0,
 ): CanonicalDOM {
   const window = new Window({ url: "https://z10.dev" });
   const document = window.document;
@@ -175,6 +184,10 @@ export function loadCanonicalDOM(
     const maxTs = scanMaxTimestamp(rootElement);
     if (maxTs > 0) {
       clock.receive(maxTs);
+    }
+    // Ensure clock is at least as high as the persisted txId from DB
+    if (dbTxId > 0) {
+      clock.receive(dbTxId);
     }
 
     // Ensure the root element (body) always has a data-z10-id.
@@ -323,9 +336,10 @@ export function getPatches(
 /**
  * Persist canonical DOM to DB via the configured callback.
  */
-export async function persistCanonicalDOM(projectId: string): Promise<void> {
+export async function persistCanonicalDOM(projectId: string, force = false): Promise<void> {
   const canonical = instances.get(projectId);
-  if (!canonical || !canonical.dirty || !managerOptions.onPersist) return;
+  if (!canonical || !managerOptions.onPersist) return;
+  if (!force && !canonical.dirty) return;
 
   const html = getCanonicalHTML(projectId) ?? canonical.rootElement.innerHTML;
   const hasPages = html.includes("data-z10-page");
@@ -340,6 +354,22 @@ export async function persistCanonicalDOM(projectId: string): Promise<void> {
   await managerOptions.onPersist(projectId, html, canonical.currentTxId);
   canonical.dirty = false;
   canonical.commitsSincePersist = 0;
+}
+
+/**
+ * Lightweight txId-only persist — updates the durable clock in DB without
+ * writing the full HTML. Falls back to full persist if onPersistTxId is not configured.
+ */
+export async function persistTxId(projectId: string): Promise<void> {
+  const canonical = instances.get(projectId);
+  if (!canonical) return;
+
+  if (managerOptions.onPersistTxId) {
+    await managerOptions.onPersistTxId(projectId, canonical.currentTxId);
+  } else if (managerOptions.onPersist) {
+    // Fallback: full persist if lightweight callback not configured
+    await persistCanonicalDOM(projectId, true);
+  }
 }
 
 /**
@@ -359,11 +389,22 @@ export async function evictCanonicalDOM(projectId: string): Promise<void> {
 }
 
 /**
+ * Get the raw canonical DOM instance (if loaded).
+ * Used by component routes to update headHTML without evicting.
+ */
+export function getCanonicalDOMInstance(projectId: string): CanonicalDOM | undefined {
+  return instances.get(projectId);
+}
+
+/**
  * Check if a canonical DOM exists for a project.
  */
 export function hasCanonicalDOM(projectId: string): boolean {
   return instances.has(projectId);
 }
+
+// safeContentWrite removed — all writes now go through transact/canonical DOM.
+// The PUT auto-save path has been eliminated.
 
 /**
  * Get the number of active canonical DOM instances.
@@ -391,22 +432,30 @@ export async function persistAllDirty(): Promise<void> {
 }
 
 /** Evict stale instances that haven't been accessed within TTL. */
-function evictStale(): void {
+async function evictStale(): Promise<void> {
   const ttl = managerOptions.ttlMs ?? DEFAULT_TTL_MS;
   const now = Date.now();
 
+  const evictions: Promise<void>[] = [];
   for (const [projectId, canonical] of instances) {
     if (now - canonical.lastAccess > ttl) {
-      // Persist dirty state before eviction
-      if (canonical.dirty && managerOptions.onPersist) {
-        persistCanonicalDOM(projectId).catch(() => {
-          // Best effort — log in production
-        });
-      }
-      canonical.window.close();
-      instances.delete(projectId);
+      evictions.push(
+        (async () => {
+          // Await persist before evicting — fire-and-forget risks data loss
+          if (canonical.dirty && managerOptions.onPersist) {
+            try {
+              await persistCanonicalDOM(projectId);
+            } catch (err) {
+              console.error(`[canonical-dom] eviction persist failed for project=${projectId}:`, err);
+            }
+          }
+          canonical.window.close();
+          instances.delete(projectId);
+        })(),
+      );
     }
   }
+  await Promise.allSettled(evictions);
 }
 
 /** Scan a DOM subtree for the maximum timestamp value. */

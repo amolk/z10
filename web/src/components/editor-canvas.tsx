@@ -8,10 +8,10 @@ import {
   memo,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { useEditor } from "@/lib/editor-state";
+import { useEditor, type EditorComponentSchema } from "@/lib/editor-state";
 import { isContainer, isTextEditable } from "@/lib/node-inference";
 import { SELECTION_COLOR, COMPONENT_COLOR } from "@/lib/editor-constants";
-import { tagNameToComponentName } from "z10/core";
+import { tagNameToComponentName, toTagName } from "z10/core";
 import {
   expandComponentTemplates,
   parseComponentTemplates,
@@ -71,13 +71,11 @@ function loadViewForPage(projectId: string, pageId: string): ViewTransform | nul
 export function EditorCanvas({
   projectId,
   initialContent,
-  saveState = "saved",
 }: {
   projectId: string;
   initialContent: string;
-  saveState?: "saved" | "saving" | "unsaved";
 }) {
-  const { selectedIds, select, clearSelection, transformRef, activeTool, setActiveTool, content, updateElementStyle, updateContent, activePageId, editingTextId, startTextEdit, commitTextEdit, hoveredLayerId, setHoveredLayerId, editingComponentName, exitComponentEditMode } = useEditor();
+  const { selectedIds, select, clearSelection, transformRef, activeTool, setActiveTool, content, updateElementStyle, updateContent, activePageId, editingTextId, startTextEdit, commitTextEdit, hoveredLayerId, setHoveredLayerId, editingComponentName, componentSchemas, styleRevision } = useEditor();
 
   // ─── Canvas pan/zoom state ─────────────────────────────────
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -295,7 +293,7 @@ export function EditorCanvas({
     [transformRef, view.scale, view.x, view.y, computeElementRect, computeFlowInsert, isFlowDisplay]
   );
 
-  // Recompute selection rects when selection changes
+  // Recompute selection rects when selection or element dimensions change
   useEffect(() => {
     if (selectedIds.size === 0) {
       setSelectionRects(new Map());
@@ -336,7 +334,7 @@ export function EditorCanvas({
     } else {
       setFlexParentRect(null);
     }
-  }, [selectedIds, view.scale, computeElementRect, transformRef]);
+  }, [selectedIds, view.scale, computeElementRect, transformRef, styleRevision]);
 
   // ─── Hover tracking ──────────────────────────────────────────
   const handleMouseMove = useCallback(
@@ -357,6 +355,11 @@ export function EditorCanvas({
       while (target && target !== canvasRef.current) {
         const id = target.getAttribute("data-z10-id");
         if (id) {
+          // Skip internal component IDs when on a page
+          if (!editingComponentName && (id.startsWith("cmp-") || id.includes("::cmp-"))) {
+            target = target.parentElement!;
+            continue;
+          }
           foundId = id;
           break;
         }
@@ -476,12 +479,20 @@ export function EditorCanvas({
       let el = target;
       while (el && el !== canvasRef.current) {
         const id = el.getAttribute("data-z10-id");
-        if (id) return id;
+        if (id) {
+          // When viewing a page (not editing a component), skip internal
+          // component template IDs so clicks bubble up to the instance wrapper.
+          if (!editingComponentName && (id.startsWith("cmp-") || id.includes("::cmp-"))) {
+            el = el.parentElement!;
+            continue;
+          }
+          return id;
+        }
         el = el.parentElement!;
       }
       return null;
     },
-    []
+    [editingComponentName]
   );
 
   // ─── Click to select element / create frame/text ───────────
@@ -1299,6 +1310,8 @@ export function EditorCanvas({
           allElements.forEach((el) => {
             const id = el.getAttribute("data-z10-id");
             if (!id) return;
+            // Skip internal component IDs when on a page
+            if (!editingComponentName && (id.startsWith("cmp-") || id.includes("::cmp-"))) return;
             const rect = computeElementRect(id);
             if (!rect) return;
             // Check if element intersects marquee
@@ -1542,19 +1555,9 @@ export function EditorCanvas({
       <div className="absolute left-3 top-3 z-10">
         <span
           className="text-[12px]"
-          style={{
-            color: saveState === "saved"
-              ? "var(--ed-text-tertiary)"
-              : saveState === "saving"
-                ? "#eab308"
-                : "#f97316",
-          }}
+          style={{ color: "var(--ed-text-tertiary)" }}
         >
-          {saveState === "saved"
-            ? "Saved"
-            : saveState === "saving"
-              ? "Saving..."
-              : "Unsaved changes"}
+          Synced
         </span>
       </div>
 
@@ -1588,24 +1591,18 @@ export function EditorCanvas({
               key={`component-${editingComponentName}`}
               style={{ position: "absolute", left: 0, top: 0 }}
             >
-              {/* Component label with back button */}
-              <div className="flex items-center gap-2 whitespace-nowrap" style={{ fontSize: 13, marginBottom: 8 }}>
-                <button
-                  onClick={exitComponentEditMode}
-                  className="text-[12px] transition-colors hover:opacity-80"
-                  style={{ color: COMPONENT_COLOR }}
-                >
-                  ← Back
-                </button>
-                <span style={{ color: "var(--ed-text-tertiary)" }}>|</span>
-                <span className="font-medium" style={{ color: COMPONENT_COLOR }}>
-                  {editingComponentName}
-                </span>
+              {/* Component label */}
+              <div
+                className="whitespace-nowrap font-medium"
+                style={{ fontSize: 13, marginBottom: 8, color: COMPONENT_COLOR }}
+              >
+                {editingComponentName}
               </div>
               {/* Component template preview */}
               <ComponentPreview
                 componentName={editingComponentName}
                 componentTemplates={componentTemplatesRef.current}
+                componentSchemas={componentSchemas}
               />
             </div>
           ) : activePage ? (
@@ -1985,13 +1982,20 @@ const PageContent = memo(function PageContent({
 /**
  * Component template preview — renders a component's template with default props
  * on a neutral background for editing/inspection.
+ *
+ * Uses the first variant's props (or prop defaults) to populate placeholders,
+ * handles {{#prop}}...{{/prop}} conditional blocks, wraps template in the
+ * component's custom-element tag so scoped CSS selectors match, and assigns
+ * data-z10-id to every element for canvas interaction.
  */
 const ComponentPreview = memo(function ComponentPreview({
   componentName,
   componentTemplates,
+  componentSchemas,
 }: {
   componentName: string;
   componentTemplates: Map<string, { template: string; styles: string }>;
+  componentSchemas: Map<string, EditorComponentSchema>;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -2001,13 +2005,80 @@ const ComponentPreview = memo(function ComponentPreview({
       ref.current.innerHTML = `<div style="padding: 40px; text-align: center; color: #999; font-size: 14px;">No template defined for ${componentName}</div>`;
       return;
     }
-    // Inject styles + expanded template with placeholder values cleared
-    let html = tmpl.template.replace(/\{\{[^}]+\}\}/g, "");
-    if (tmpl.styles) {
-      html = `<style>${tmpl.styles}</style>${html}`;
+
+    // Build default props from schema: use first variant's props, then
+    // fall back to individual prop defaults, then prop name as placeholder
+    const schema = componentSchemas.get(componentName);
+    const props: Record<string, unknown> = {};
+    if (schema) {
+      // Start with individual prop defaults
+      for (const p of schema.props) {
+        props[p.name] = p.default ?? p.name;
+      }
+      // Override with first variant's props (if any)
+      if (schema.variants.length > 0) {
+        const firstVariant = schema.variants[0]!;
+        Object.assign(props, firstVariant.props);
+      }
     }
+
+    // Expand the template with prop values
+    let expanded = tmpl.template;
+
+    // 1. Handle {{#prop}}...{{/prop}} conditional blocks: keep content if
+    //    prop is truthy, remove the block otherwise
+    expanded = expanded.replace(
+      /\{\{#(\w+)\}\}([\s\S]*?)\{\{\/\1\}\}/g,
+      (_m, propName, content) => {
+        const val = props[propName];
+        return val ? content : "";
+      },
+    );
+
+    // 2. Substitute {{propName}} value placeholders
+    expanded = expanded.replace(/\{\{(\w+)\}\}/g, (_m, name) => {
+      const val = props[name];
+      return val != null ? String(val) : name;
+    });
+
+    // Collect ALL component styles (same as expandComponentTemplates on pages)
+    const allStyles: string[] = [];
+    for (const [, comp] of componentTemplates) {
+      if (comp.styles) allStyles.push(comp.styles);
+    }
+
+    // Build HTML: styles + wrapper element with the component's tag name
+    // so scoped CSS selectors match (e.g. `z10-mailbox-item .mailbox-count`)
+    const tagName = toTagName(componentName);
+
+    let html = "";
+    if (allStyles.length > 0) {
+      html += `<style>${allStyles.join("\n")}</style>`;
+    }
+    html += `<${tagName} style="display:block">${expanded}</${tagName}>`;
     ref.current.innerHTML = html;
-  }, [componentName, componentTemplates]);
+
+    // Assign data-z10-id to template elements (not the wrapper tag) so they
+    // can be selected on the canvas and appear in the layers tree.
+    // IDs are deterministic (cmp-<Name>-<n>) matching the assets-panel layer tree.
+    let counter = 0;
+    const walk = (el: Element) => {
+      if (el.tagName === "STYLE" || el.tagName === "SCRIPT") return;
+      if (el instanceof HTMLElement && !el.getAttribute("data-z10-id")) {
+        el.setAttribute("data-z10-id", `cmp-${componentName}-${++counter}`);
+      }
+      for (const child of Array.from(el.children)) {
+        walk(child);
+      }
+    };
+    // Find the wrapper tag element and walk only its children (the actual
+    // template content), skipping the wrapper itself
+    const wrapperTag = ref.current.querySelector(tagName);
+    const walkRoot = wrapperTag || ref.current;
+    for (const child of Array.from(walkRoot.children)) {
+      walk(child);
+    }
+  }, [componentName, componentTemplates, componentSchemas]);
   return (
     <div
       ref={ref}

@@ -17,8 +17,10 @@ const SAVE_DEBOUNCE_MS = 1500;
  * Debounces at 1.5s like Figma.
  */
 export function useAutoSave(projectId: string, initialContent: string) {
-  const { content, transformRef, isExternalUpdate } = useEditor();
+  const { content, transformRef, undoSuppressRef, editingComponentName } = useEditor();
   const [saveState, setSaveState] = useState<"saved" | "saving" | "unsaved">("saved");
+  const editingComponentRef = useRef(editingComponentName);
+  editingComponentRef.current = editingComponentName;
   const contentRef = useRef(initialContent);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const lastSavedRef = useRef(initialContent);
@@ -63,18 +65,10 @@ export function useAutoSave(projectId: string, initialContent: string) {
   // Skip saving when the update came from an external source (MCP agent)
   // since the server already has the latest content.
   useEffect(() => {
-    if (isExternalUpdate.current) {
-      // Mark as saved (server already has this content) and reset flag
-      contentRef.current = content;
-      lastSavedRef.current = content;
-      isExternalUpdate.current = false;
-      setSaveState("saved");
-      return;
-    }
     if (content && content !== lastSavedRef.current) {
       debouncedSave(content);
     }
-  }, [content, debouncedSave, isExternalUpdate]);
+  }, [content, debouncedSave]);
 
   // MutationObserver on transform layer to catch direct DOM edits
   // (keyboard shortcuts: delete, duplicate, group, paste, reorder)
@@ -83,6 +77,17 @@ export function useAutoSave(projectId: string, initialContent: string) {
     if (!el) return;
 
     const observer = new MutationObserver(() => {
+      // SAFETY: Skip during external updates (agent patches, resync).
+      // The server already has authoritative state; saving browser DOM
+      // during a resync would overwrite it with stale content → data loss.
+      if (undoSuppressRef.current) return;
+
+      // Skip DOM serialization in component edit mode — the transform layer
+      // contains ComponentPreview (not page content), so serializing it would
+      // overwrite the page body with component preview HTML. Template edits
+      // are persisted via the content-based save path instead.
+      if (editingComponentRef.current) return;
+
       // Serialize current DOM state back to content, preserving the head
       // (config, tokens, component definitions) from the current content.
       const serialized = serializeTransformLayer(el, contentRef.current);
@@ -95,7 +100,7 @@ export function useAutoSave(projectId: string, initialContent: string) {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ["style", "class", "data-z10-id", "data-z10-page"],
+      attributeFilter: ["style", "class", "data-z10-id", "data-z10-page", "data-z10-overrides"],
     });
 
     return () => observer.disconnect();

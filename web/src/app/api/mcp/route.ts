@@ -37,6 +37,7 @@ import {
   createDocument,
 } from "z10";
 import { LocalProxy } from "z10/dom";
+import { hasCanonicalDOM } from "@/lib/canonical-dom";
 
 // ---------------------------------------------------------------------------
 // Session state per MCP connection
@@ -111,6 +112,9 @@ async function loadProject(state: McpSessionState, projectId: string) {
 
 async function saveToDb(state: McpSessionState) {
   if (!state.selectedProjectId || !state.doc) return;
+  // Skip direct DB write when canonical DOM is loaded — it holds
+  // authoritative state and persists on its own schedule.
+  if (hasCanonicalDOM(state.selectedProjectId)) return;
   try {
     const html = serializeZ10Html(state.doc);
     await db

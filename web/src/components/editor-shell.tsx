@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { EditorProvider } from "@/lib/editor-state";
 import { useKeyboardShortcuts } from "@/lib/use-keyboard-shortcuts";
-import { useAutoSave } from "@/lib/use-auto-save";
+import { useMutationBridge } from "@/lib/use-mutation-bridge";
 import { useUndoRedo } from "@/lib/use-undo-redo";
 import { usePatchStream } from "@/lib/use-patch-stream";
 import { useCanvasPatchReplay } from "@/lib/use-canvas-patch-replay";
@@ -17,7 +17,7 @@ import { PropertiesPanel } from "@/components/properties-panel";
 import { ConnectAgentButton } from "@/components/connect-agent-button";
 import { useEditor } from "@/lib/editor-state";
 import { PanelLeft, PanelRight, Sun, Moon } from "lucide-react";
-import { useState, useRef, useEffect } from "react";
+import { useRef, useEffect } from "react";
 import { parseComponentTemplates } from "@/lib/z10-dom";
 
 export function EditorShell({
@@ -51,7 +51,6 @@ function EditorShellInner({
 }) {
   useKeyboardShortcuts();
   useUndoRedo();
-  const { saveState } = useAutoSave(projectId, initialContent);
   const {
     content,
     transformRef,
@@ -62,6 +61,12 @@ function EditorShellInner({
     undoSuppressRef,
     setOnStyleEdit,
     activePageId,
+    editingComponentName,
+    enterComponentEditMode,
+    exitComponentEditMode,
+    componentList,
+    leftTab,
+    setLeftTab,
     leftPanelVisible,
     rightPanelVisible,
     setLeftPanelVisible,
@@ -85,6 +90,10 @@ function EditorShellInner({
   // D4: Edit bridge — wires updateElementStyle to send code to server
   useEditBridge(updateElementStyle, transact, activePageId, setOnStyleEdit);
 
+  // Mutation bridge — sends keyboard shortcut DOM mutations to server via transact.
+  // Replaces the old useAutoSave PUT path. Also handles Cmd+S flush + beforeunload.
+  useMutationBridge(projectId, transact);
+
   // D2+D3: Patch replay — applies ops directly to canvas DOM via replayPatch(A15),
   // then refreshes layers panel from live DOM
   // D5: validateSelection clears stale selected IDs after agent patches
@@ -105,7 +114,7 @@ function EditorShellInner({
     isOwnTx,
   );
 
-  const [leftTab, setLeftTab] = useState<"layers" | "assets">("layers");
+  // leftTab and setLeftTab now come from editor context
 
   return (
     <div className="flex h-screen flex-col">
@@ -188,17 +197,26 @@ function EditorShellInner({
               style={{ borderColor: "var(--ed-panel-border)" }}
             >
               <button
-                onClick={() => setLeftTab("layers")}
+                onClick={() => {
+                  setLeftTab("pages");
+                  exitComponentEditMode();
+                }}
                 className="flex-1 py-1.5 text-center transition-colors"
                 style={{
-                  color: leftTab === "layers" ? "var(--ed-text)" : "var(--ed-text-tertiary)",
-                  borderBottom: leftTab === "layers" ? "2px solid var(--ed-text)" : "2px solid transparent",
+                  color: leftTab === "pages" ? "var(--ed-text)" : "var(--ed-text-tertiary)",
+                  borderBottom: leftTab === "pages" ? "2px solid var(--ed-text)" : "2px solid transparent",
                 }}
               >
-                Layers
+                Pages
               </button>
               <button
-                onClick={() => setLeftTab("assets")}
+                onClick={() => {
+                  setLeftTab("assets");
+                  // Auto-select first component if none is selected
+                  if (!editingComponentName && componentList.length > 0) {
+                    enterComponentEditMode(componentList[0]!);
+                  }
+                }}
                 className="flex-1 py-1.5 text-center transition-colors"
                 style={{
                   color: leftTab === "assets" ? "var(--ed-text)" : "var(--ed-text-tertiary)",
@@ -209,14 +227,14 @@ function EditorShellInner({
               </button>
             </div>
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-              {leftTab === "layers" ? <LayersPanel /> : <AssetsPanel />}
+              {leftTab === "pages" ? <LayersPanel /> : <AssetsPanel />}
             </div>
           </div>
         )}
         <ToolsToolbar />
 
         <div className="relative flex-1">
-          <EditorCanvas projectId={projectId} initialContent={initialContent} saveState={saveState} />
+          <EditorCanvas projectId={projectId} initialContent={initialContent} />
         </div>
 
         {rightPanelVisible && <PropertiesPanel />}

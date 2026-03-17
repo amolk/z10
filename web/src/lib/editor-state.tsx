@@ -96,6 +96,9 @@ export type EditorState = {
   collapsedIds: Set<string>;
   toggleCollapsed: (id: string) => void;
 
+  /** Bumped after each updateElementStyle call so canvas can recompute selection rects. */
+  styleRevision: number;
+
   // Layer tree
   layers: LayerNode[];
 
@@ -105,10 +108,8 @@ export type EditorState = {
   // Content management
   content: string;
   updateElementStyle: (id: string, styles: Record<string, string>) => void;
-  /** Replace content from an external source (e.g. MCP agent write). Reparses layers. */
+  /** Replace content from an external source (e.g. MCP agent write / resync). Reparses layers. */
   updateContent: (newContent: string) => void;
-  /** True when the last content update came from an external source (skip auto-save) */
-  isExternalUpdate: RefObject<boolean>;
 
   /** Re-derive layers from the live DOM in transformRef (active page only). */
   refreshLayersFromDOM: () => void;
@@ -144,6 +145,10 @@ export type EditorState = {
 
   // Group selected elements into a frame
   groupIntoFrame: () => void;
+
+  // Left panel tab
+  leftTab: "pages" | "assets";
+  setLeftTab: (tab: "pages" | "assets") => void;
 
   // Component editing
   editingComponentName: string | null;
@@ -193,7 +198,7 @@ export function EditorProvider({
   // so initialising with [] avoids a server/client hydration mismatch.
   const [layers, setLayers] = useState<LayerNode[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const isExternalUpdate = useRef(false);
+  // isExternalUpdate ref removed — no longer needed since all writes go through transact
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   const [lockedIds, setLockedIds] = useState<Set<string>>(new Set());
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
@@ -213,13 +218,21 @@ export function EditorProvider({
   const [componentList, setComponentList] = useState<string[]>([]);
   const [componentSchemas, setComponentSchemas] = useState<Map<string, EditorComponentSchema>>(new Map());
   const [hoveredLayerId, setHoveredLayerId] = useState<string | null>(null);
+  const [leftTab, setLeftTab] = useState<"pages" | "assets">("pages");
+  const [styleRevision, setStyleRevision] = useState(0);
 
   const enterComponentEditMode = useCallback((name: string) => {
     setEditingComponentName(name);
+    setSelectedIds(new Set());
+    setLeftTab("assets");
+    // Inject data-z10-id into template elements that don't have them,
+    // so updateElementStyle can find and persist style changes.
+    setContent((prev) => ensureTemplateIds(prev, name));
   }, []);
 
   const exitComponentEditMode = useCallback(() => {
     setEditingComponentName(null);
+    setSelectedIds(new Set());
   }, []);
 
   const createComponentFromSelection = useCallback(() => {
@@ -412,86 +425,75 @@ export function EditorProvider({
   const updateElementStyle = useCallback((id: string, styles: Record<string, string>) => {
     const el = transformRef.current?.querySelector(`[data-z10-id="${id}"]`) as HTMLElement | null;
     if (!el) return;
+
+    // Apply styles to the live DOM element (optimistic, instant)
     for (const [prop, value] of Object.entries(styles)) {
       el.style.setProperty(prop, value);
     }
-    // Trigger content serialization from live DOM
-    setContent((prev) => {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(prev, "text/html");
-      const target = doc.querySelector(`[data-z10-id="${id}"]`) as HTMLElement | null;
-      if (target) {
+
+    // Component instance wrapper: forward style to the template root element
+    // so it's visually applied. Store as an override on the instance for persistence.
+    if (el.getAttribute("data-z10-component") && el.getAttribute("data-z10-expanded") === "true") {
+      const firstChild = el.querySelector("[data-z10-id]") as HTMLElement | null;
+      if (firstChild) {
+        const childId = firstChild.getAttribute("data-z10-id") || "";
         for (const [prop, value] of Object.entries(styles)) {
-          target.style.setProperty(prop, value);
+          firstChild.style.setProperty(prop, value);
         }
+        const sep = childId.indexOf("::cmp-");
+        const templateChildId = sep >= 0 ? childId.slice(sep + 2) : childId;
+        const existing = el.getAttribute("data-z10-overrides");
+        let overrides: Record<string, Record<string, string>> = {};
+        if (existing) {
+          try { overrides = JSON.parse(existing); } catch { /* ignore */ }
+        }
+        overrides[templateChildId] = { ...(overrides[templateChildId] || {}), ...styles };
+        el.setAttribute("data-z10-overrides", JSON.stringify(overrides));
+        // Edit bridge sends the override attribute change to the server via transact
+        onStyleEditRef.current?.(id, styles);
+        setStyleRevision((r) => r + 1);
+        return;
       }
-      return `<html${doc.documentElement.getAttribute("data-z10-project") ? ` data-z10-project="${doc.documentElement.getAttribute("data-z10-project")}"` : ""}>\n${doc.documentElement.innerHTML}\n</html>`;
-    });
-    // D4: Notify edit bridge for server dispatch
+    }
+
+    // Component template elements (IDs like "cmp-<Name>-<n>"): styles are applied
+    // to the live DOM above. The edit bridge sends the change to the server which
+    // updates the template in the canonical DOM's <head>.
+    const cmpMatch = id.match(/^cmp-(\w+)-\d+$/);
+    if (cmpMatch) {
+      onStyleEditRef.current?.(id, styles);
+      setStyleRevision((r) => r + 1);
+      return;
+    }
+
+    // Instance-scoped element ("instanceId::cmp-Name-n"): store overrides on the
+    // instance element in the live DOM so they survive re-expansion.
+    const instanceMatch = id.match(/^(.+)::cmp-/);
+    if (instanceMatch) {
+      const instanceId = instanceMatch[1]!;
+      const templateChildId = id.slice(instanceId.length + 2);
+      const instanceEl = transformRef.current?.querySelector(
+        `[data-z10-id="${instanceId}"]`,
+      ) as HTMLElement | null;
+      if (instanceEl) {
+        const existing = instanceEl.getAttribute("data-z10-overrides");
+        let overrides: Record<string, Record<string, string>> = {};
+        if (existing) {
+          try { overrides = JSON.parse(existing); } catch { /* ignore */ }
+        }
+        overrides[templateChildId] = { ...(overrides[templateChildId] || {}), ...styles };
+        instanceEl.setAttribute("data-z10-overrides", JSON.stringify(overrides));
+      }
+      // Edit bridge sends the override attribute change to the server via transact
+      onStyleEditRef.current?.(id, styles);
+      setStyleRevision((r) => r + 1);
+      return;
+    }
+
+    // Regular page element — live DOM already mutated above.
+    // Edit bridge sends style change to the server via transact.
     onStyleEditRef.current?.(id, styles);
-  }, []);
-
-  const groupIntoFrame = useCallback(() => {
-    if (selectedIds.size < 1) return;
-    setContent((prev) => {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(prev, "text/html");
-      const elements: HTMLElement[] = [];
-      for (const id of selectedIds) {
-        const el = doc.querySelector(`[data-z10-id="${id}"]`) as HTMLElement | null;
-        if (el) elements.push(el);
-      }
-      if (elements.length === 0) return prev;
-
-      // Compute bounding box from inline styles
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      for (const el of elements) {
-        const left = parseFloat(el.style.left) || 0;
-        const top = parseFloat(el.style.top) || 0;
-        const width = parseFloat(el.style.width) || 100;
-        const height = parseFloat(el.style.height) || 50;
-        minX = Math.min(minX, left);
-        minY = Math.min(minY, top);
-        maxX = Math.max(maxX, left + width);
-        maxY = Math.max(maxY, top + height);
-      }
-
-      // Create frame wrapper
-      const frameId = `frame_${Date.now()}`;
-      const frame = doc.createElement("div");
-      frame.setAttribute("data-z10-id", frameId);
-      const padding = 16;
-      frame.setAttribute("style", `position: absolute; left: ${Math.round(minX - padding)}px; top: ${Math.round(minY - padding)}px; width: ${Math.round(maxX - minX + padding * 2)}px; height: ${Math.round(maxY - minY + padding * 2)}px; display: flex; border-radius: 8px;`);
-
-      // Insert frame before first element, move all into it
-      const parent = elements[0].parentElement;
-      if (!parent) return prev;
-      parent.insertBefore(frame, elements[0]);
-      for (const el of elements) {
-        // Adjust positions relative to frame
-        const left = parseFloat(el.style.left) || 0;
-        const top = parseFloat(el.style.top) || 0;
-        el.style.left = `${Math.round(left - minX + padding)}px`;
-        el.style.top = `${Math.round(top - minY + padding)}px`;
-        frame.appendChild(el);
-      }
-
-      const result = `<html${doc.documentElement.getAttribute("data-z10-project") ? ` data-z10-project="${doc.documentElement.getAttribute("data-z10-project")}"` : ""}>\n${doc.documentElement.innerHTML}\n</html>`;
-      // Schedule layer re-parse
-      setTimeout(() => {
-        setLayers(parseLayerTree(result));
-        setSelectedIds(new Set([frameId]));
-      }, 0);
-      return result;
-    });
-  }, [selectedIds]);
-
-  const updateContent = useCallback((newContent: string) => {
-    isExternalUpdate.current = true;
-    setContent(newContent);
-    setLayers(parseLayerTree(newContent));
-    // Clear selection — element IDs may have changed
-    setSelectedIds(new Set());
+    setStyleRevision((r) => r + 1);
   }, []);
 
   // D3: Re-derive layers from the live DOM (active page only).
@@ -506,6 +508,64 @@ export function EditorProvider({
     setLayers((prev) =>
       prev.map((l) => (l.id === updatedPage.id ? updatedPage : l)),
     );
+  }, []);
+
+  const groupIntoFrame = useCallback(() => {
+    if (selectedIds.size < 1) return;
+    const root = transformRef.current;
+    if (!root) return;
+
+    // Find elements in live DOM
+    const elements: HTMLElement[] = [];
+    for (const id of selectedIds) {
+      const el = root.querySelector(`[data-z10-id="${id}"]`) as HTMLElement | null;
+      if (el) elements.push(el);
+    }
+    if (elements.length === 0) return;
+
+    // Compute bounding box from inline styles
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const el of elements) {
+      const left = parseFloat(el.style.left) || 0;
+      const top = parseFloat(el.style.top) || 0;
+      const width = parseFloat(el.style.width) || 100;
+      const height = parseFloat(el.style.height) || 50;
+      minX = Math.min(minX, left);
+      minY = Math.min(minY, top);
+      maxX = Math.max(maxX, left + width);
+      maxY = Math.max(maxY, top + height);
+    }
+
+    // Create frame wrapper in live DOM
+    const frameId = `frame_${Date.now()}`;
+    const frame = document.createElement("div");
+    frame.setAttribute("data-z10-id", frameId);
+    const padding = 16;
+    frame.setAttribute("style", `position: absolute; left: ${Math.round(minX - padding)}px; top: ${Math.round(minY - padding)}px; width: ${Math.round(maxX - minX + padding * 2)}px; height: ${Math.round(maxY - minY + padding * 2)}px; display: flex; border-radius: 8px;`);
+
+    // Insert frame before first element, move all into it
+    const parent = elements[0].parentElement;
+    if (!parent) return;
+    parent.insertBefore(frame, elements[0]);
+    for (const el of elements) {
+      const left = parseFloat(el.style.left) || 0;
+      const top = parseFloat(el.style.top) || 0;
+      el.style.left = `${Math.round(left - minX + padding)}px`;
+      el.style.top = `${Math.round(top - minY + padding)}px`;
+      frame.appendChild(el);
+    }
+
+    // MutationObserver catches the DOM changes and sends transaction.
+    // Refresh layers from live DOM.
+    refreshLayersFromDOM();
+    setSelectedIds(new Set([frameId]));
+  }, [selectedIds, refreshLayersFromDOM]);
+
+  const updateContent = useCallback((newContent: string) => {
+    setContent(newContent);
+    setLayers(parseLayerTree(newContent));
+    // Clear selection — element IDs may have changed
+    setSelectedIds(new Set());
   }, []);
 
   // D5: Remove selected IDs that no longer exist in the live DOM.
@@ -647,6 +707,7 @@ export function EditorProvider({
         toggleLock,
         collapsedIds,
         toggleCollapsed,
+        styleRevision,
         layers,
         transformRef,
         content,
@@ -656,7 +717,6 @@ export function EditorProvider({
         validateSelection,
         undoSuppressRef,
         setOnStyleEdit,
-        isExternalUpdate,
         activePageId,
         setActivePageId,
         leftPanelVisible,
@@ -669,6 +729,8 @@ export function EditorProvider({
         startTextEdit,
         commitTextEdit,
         groupIntoFrame,
+        leftTab,
+        setLeftTab,
         editingComponentName,
         enterComponentEditMode,
         exitComponentEditMode,
@@ -924,6 +986,103 @@ function elementToNode(el: HTMLElement, depth: number): LayerNode {
   }
 
   return { id, name, tag: el.tagName.toLowerCase(), type, children, depth };
+}
+
+/**
+ * Update a style property on an element inside a component's <template> block.
+ * Since DOMParser puts <template> content into a document fragment (not queryable
+ * via querySelector on the main doc), we extract the template content via regex,
+ * parse it separately, find the element by data-z10-id, apply styles, and splice back.
+ */
+function updateComponentTemplateElementStyle(
+  contentStr: string,
+  componentName: string,
+  elementId: string,
+  styles: Record<string, string>,
+): string {
+  const slug = componentName
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .replace(/([A-Z])([A-Z][a-z])/g, "$1-$2")
+    .toLowerCase();
+
+  const newRe = new RegExp(
+    `(<template\\s+id="z10-${slug}-template"\\s*>)([\\s\\S]*?)(</template>)`,
+  );
+  const oldRe = new RegExp(
+    `(<template\\s+data-z10-template="${componentName}"\\s*>)([\\s\\S]*?)(</template>)`,
+  );
+
+  const match = contentStr.match(newRe) || contentStr.match(oldRe);
+  if (!match) return contentStr;
+
+  const templateContent = match[2]!;
+
+  // Parse template content separately (not inside a <template> tag)
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${templateContent}</div>`, "text/html");
+  const wrapper = doc.body.firstElementChild as HTMLElement;
+  if (!wrapper) return contentStr;
+
+  const target = wrapper.querySelector(`[data-z10-id="${elementId}"]`) as HTMLElement | null;
+  if (!target) return contentStr;
+
+  for (const [prop, value] of Object.entries(styles)) {
+    target.style.setProperty(prop, value);
+  }
+
+  const newTemplateContent = wrapper.innerHTML;
+  return contentStr.replace(match[0]!, match[1]! + newTemplateContent + match[3]!);
+}
+
+/**
+ * Ensure all elements inside a component's <template> block have data-z10-id
+ * attributes. This allows updateElementStyle to find and persist changes to
+ * component template elements, just like regular page elements.
+ */
+function ensureTemplateIds(contentStr: string, componentName: string): string {
+  const slug = componentName
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .replace(/([A-Z])([A-Z][a-z])/g, "$1-$2")
+    .toLowerCase();
+
+  const newRe = new RegExp(
+    `(<template\\s+id="z10-${slug}-template"\\s*>)([\\s\\S]*?)(</template>)`,
+  );
+  const oldRe = new RegExp(
+    `(<template\\s+data-z10-template="${componentName}"\\s*>)([\\s\\S]*?)(</template>)`,
+  );
+
+  const match = contentStr.match(newRe) || contentStr.match(oldRe);
+  if (!match) return contentStr;
+
+  const fullTemplateContent = match[2]!;
+
+  // Parse and assign IDs
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div>${fullTemplateContent}</div>`, "text/html");
+  const wrapper = doc.body.firstElementChild as HTMLElement;
+  if (!wrapper) return contentStr;
+
+  let changed = false;
+  let counter = 0;
+  const walk = (el: Element) => {
+    if (el.tagName === "STYLE" || el.tagName === "SCRIPT") return;
+    if (el instanceof HTMLElement && !el.getAttribute("data-z10-id")) {
+      el.setAttribute("data-z10-id", `cmp-${componentName}-${++counter}`);
+      changed = true;
+    }
+    for (const child of Array.from(el.children)) {
+      walk(child);
+    }
+  };
+  for (const child of Array.from(wrapper.children)) {
+    walk(child);
+  }
+
+  if (!changed) return contentStr;
+
+  const newTemplateContent = wrapper.innerHTML;
+  return contentStr.replace(match[0]!, match[1]! + newTemplateContent + match[3]!);
 }
 
 /** Find all ancestor node IDs for a given node ID in the layer tree */

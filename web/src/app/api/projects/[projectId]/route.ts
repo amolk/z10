@@ -49,6 +49,9 @@ export async function PUT(
     );
   }
 
+  // NOTE: The browser editor no longer uses PUT for saving — all edits flow
+  // through POST /transact. This endpoint is kept for backward compatibility
+  // (e.g., external tools that write content directly).
   const [updated] = await db
     .update(projects)
     .set({ content, updatedAt: new Date() })

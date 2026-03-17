@@ -16,6 +16,8 @@ import { authenticateMcp } from "@/lib/mcp-auth";
 import { db } from "@/db";
 import { projects, users } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
+import { getUserLimiter } from "@/lib/request-rate-limit";
+import { hasCanonicalDOM } from "@/lib/canonical-dom";
 
 
 import { incrementMcpCalls, checkMcpLimit } from "@/lib/usage";
@@ -135,6 +137,9 @@ function createMcpServerForDoc(pd: ProjectDoc): McpServer {
   });
 
   const saveToDb = async () => {
+    // Skip direct DB write when canonical DOM is loaded — it holds
+    // authoritative state and persists on its own schedule.
+    if (hasCanonicalDOM(projectId)) return;
     try {
       const html = serializeZ10Html(doc);
       await db
@@ -224,6 +229,22 @@ async function handleMcpRequest(
       status: 401,
       headers: { "Content-Type": "application/json" },
     });
+  }
+
+  // Per-request rate limiting
+  const limiter = getUserLimiter(authed.userId);
+  const rateCheck = request.method === "POST" ? limiter.tryWrite() : limiter.tryRead();
+  if (!rateCheck.allowed) {
+    return new Response(
+      JSON.stringify({ error: "Rate limit exceeded" }),
+      {
+        status: 429,
+        headers: {
+          "Content-Type": "application/json",
+          "Retry-After": String(Math.ceil(rateCheck.retryAfterMs / 1000)),
+        },
+      }
+    );
   }
 
   // Connect tokens are project-scoped — reject if used against wrong project
