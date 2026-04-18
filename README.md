@@ -2,255 +2,137 @@
 
 Branchable UI evolution for the agent era.
 
-Zero-10 is a design tool built on annotated web standards. Its `.z10.html` file format uses `data-z10-*` attributes and `<script type="application/z10+json">` metadata over standard HTML/CSS, enabling AI coding agents to read and write UI designs natively through a token-efficient MCP protocol.
+Zero-10 is a design tool where AI agents edit designs through standard DOM APIs. The `.z10.html` file format annotates plain HTML/CSS with `data-z10-*` attributes and `<script type="application/z10+json">` metadata, so agents can read and write UI natively — no custom SDK, no brittle schema.
 
-## Quick Start
+![Qualtrics dashboard built by an agent in the z10 editor](docs/images/dashboard.png)
 
-```bash
-npm install
-npm run build
+*Dashboard built by Claude Code via the [z10 skill](skills/z10/SKILL.md) — sidebar, metric cards, response-trend SVG chart, NPS breakdown, and recent-surveys table. Each component is a reusable `<z10-*>` element with typed props.*
 
-# Create a new design file
-z10 new "My App"
+## Getting started
 
-# Start the MCP server
-z10 serve my-app.z10.html
+You need three things running: **Postgres**, the **web app** (the canvas + API), and **Claude Code** with the z10 skill installed.
 
-# Connect Claude Code
-claude mcp add zero10 --transport http http://127.0.0.1:29910/mcp --scope user
-```
-
-## CLI Reference
-
-```
-z10 new [name]                          Create a new .z10.html file
-z10 serve [file] [--port N]             Start MCP server (default: 29910)
-z10 info <file>                         Show document summary
-z10 config <file> [key] [value]         Get/set configuration
-z10 branch [name]                       Create/list design branches
-z10 diff <ref1>..<ref2>                 Semantic diff between Git refs
-z10 merge <branch> [--into <target>]    Merge a design branch
-z10 sync --design <file>                Check design sync status
-```
-
-### Configuration
+### 1. Start Postgres
 
 ```bash
-# Show all config
-z10 config app.z10.html
-
-# Get a single value
-z10 config app.z10.html governance
-
-# Set a value
-z10 config app.z10.html governance scoped-edit
+docker run --name z10-pg \
+  -e POSTGRES_DB=z10 -e POSTGRES_USER=z10 -e POSTGRES_PASSWORD=z10 \
+  -p 5432:5432 -d postgres:16
 ```
 
-Config keys: `name`, `version`, `governance` (full-edit | propose-approve | scoped-edit), `defaultMode` (light | dark).
-
-### Design Branches
-
-Zero-10 uses Git-native branching with a `z10/` prefix:
-
-```bash
-z10 branch "dark-mode-exploration"       # Creates z10/dark-mode-exploration
-z10 branch                               # Lists all z10/* branches
-z10 diff main..z10/dark-mode-exploration # Semantic node-level diff
-z10 merge dark-mode-exploration --into main
-```
-
-## MCP Server
-
-The MCP server exposes 19 tools for AI agents to read and modify `.z10.html` documents.
-
-### Connection
-
-| Client | Command |
-|--------|---------|
-| Claude Code | `claude mcp add zero10 --transport http http://127.0.0.1:29910/mcp --scope user` |
-| Cursor | `cursor://settings/mcp?name=zero10&url=http://127.0.0.1:29910/mcp` |
-| Any HTTP MCP client | `http://127.0.0.1:29910/mcp` |
-
-### Read Tools
-
-| Tool | Purpose |
-|------|---------|
-| `get_project_summary` | Component inventory, tokens, pages, config |
-| `get_component_props(name)` | Props schema for a component |
-| `get_node_info(id)` | Full node details by ID |
-| `get_tree(id?, depth?)` | Subtree hierarchy (compact text) |
-| `get_styles(id)` | Computed CSS for a node |
-| `get_tokens(collection?)` | Design token values |
-| `get_guide(topic?)` | Contextual help for agents |
-
-### Write Tools (12 Primitives)
-
-| Tool | Purpose |
-|------|---------|
-| `z10.node(id, opts)` | Create container element |
-| `z10.text(id, opts)` | Create text element |
-| `z10.instance(id, opts)` | Instantiate a component |
-| `z10.repeat(id, opts)` | Generate repeated elements with faker data |
-| `z10.style(id, props)` | Update CSS properties (merge semantics) |
-| `z10.move(id, opts)` | Move/reorder in tree |
-| `z10.remove(id)` | Remove node and children |
-| `z10.component(name, schema)` | Define/update component |
-| `z10.tokens(collection, vars)` | Add/update design tokens |
-| `z10.batch(commands[])` | Multiple commands atomically |
-| `z10.attr(id, attrs)` | Set HTML/data attributes |
-| `write_html(id, html)` | Raw HTML fallback |
-
-### Agent Governance
-
-Three levels control what agents can edit:
-
-- **full-edit** (default): Agent writes directly. Every edit appears immediately.
-- **propose-approve**: Agent writes to staging. Designer accepts/rejects per change.
-- **scoped-edit**: Agent can only edit nodes with `data-z10-agent-editable="true"`.
-
-Set via `z10 config <file> governance <level>` or in the config script block.
-
-## File Format
-
-A `.z10.html` file is valid HTML:
-
-```html
-<html data-z10-project="My App">
-<head>
-  <script type="application/z10+json" data-z10-role="config">
-    { "name": "My App", "version": "1.0.0", "governance": "full-edit", "defaultMode": "light" }
-  </script>
-  <style data-z10-tokens="primitives">
-    :root { --blue-500: #3b82f6; --gray-900: #111827; }
-  </style>
-  <style data-z10-tokens="semantic">
-    :root { --primary: var(--blue-500); --text: var(--gray-900); }
-  </style>
-
-  <!-- Component: script (metadata) + style + template -->
-  <script type="application/z10+json" data-z10-role="component">
-    { "name": "Button", "props": [...], "variants": [...] }
-  </script>
-  <style data-z10-component-styles="Button">.btn { ... }</style>
-  <template data-z10-template="Button"><button class="btn">{{label}}</button></template>
-</head>
-<body>
-  <div data-z10-page="Dashboard" data-z10-mode="light">
-    <div data-z10-id="header" data-z10-intent="layout" style="display:flex;">
-      ...
-    </div>
-  </div>
-</body>
-</html>
-```
-
-Key attributes:
-- `data-z10-id` — Stable node identifier (survives edits, used for diffing/matching)
-- `data-z10-intent` — Semantic intent: layout, design, decoration, content, interaction, code-region
-- `data-z10-editor` — Who last edited: designer, agent, developer
-- `data-z10-agent-editable` — Per-node agent governance override
-- `data-z10-component` — Component name for instances
-- `data-z10-page` / `data-z10-mode` — Page containers with display mode
-
-## Runtime
-
-The Z10 runtime handles template instantiation, faker data, and mode switching. It's included as a library module — the file renders basic HTML without it, but component instances don't expand.
-
-### Faker Data
-
-Seeded by node ID for stable values across reloads. Used in `z10.repeat`:
-
-```
-z10.repeat("card_grid_item", {
-  parent: "card_grid", count: 12, component: "Card",
-  props: {
-    title: { faker: "company.name" },
-    subtitle: { faker: "company.catchPhrase" },
-    price: { faker: "finance.price" }
-  }
-})
-```
-
-Supported categories: `person`, `company`, `lorem`, `date`, `number`, `image`, `address`, `finance`, `color`, `phone`, `internet`.
-
-### Mode Switching
-
-Pages support light/dark modes via the `data-z10-mode` attribute. The runtime provides programmatic switching and mode-aware token resolution.
-
-## Web App
-
-The `web/` directory contains a Next.js 16 application providing a visual editor, team collaboration, and hosted MCP endpoints.
-
-### Setup
+### 2. Start the web app
 
 ```bash
 cd web
-cp .env.example .env.local  # Configure auth + database
+cp .env.example .env.local        # first time only — fill in AUTH_SECRET + OAuth
 npm install
-npm run dev
+npm run db:push                   # first time only — apply schema
+npm run dev                       # http://localhost:3000
 ```
 
-### MCP Endpoints
+Then:
 
-| Endpoint | Purpose |
-|----------|---------|
-| `/api/projects/[projectId]/mcp` | Per-project MCP (scoped to one project) |
-| `/api/mcp` | Global MCP (agent selects project dynamically) |
+1. Open `http://localhost:3000` and sign in with GitHub or Google.
+2. From the dashboard, click **New project** and open it in the editor.
+3. Go back to the dashboard, click **Settings** in the header (`/dashboard/settings`).
+4. Under **API Keys**, click **Create API Key**, give it a name, and copy the token shown in the dialog. **The full token is only displayed once** — if you lose it, delete the key and create a new one. You'll use this token in the next step.
 
-Both endpoints support session + API key authentication. Connect from any MCP client:
+### 3. Point the CLI at the web app
+
+The z10 CLI talks to the web app's REST API:
 
 ```bash
-# Per-project
-claude mcp add zero10 --transport http http://localhost:3000/api/projects/<id>/mcp
-
-# Global (agent picks project)
-claude mcp add zero10 --transport http http://localhost:3000/api/mcp
+npm install -g .                                           # from the repo root, installs the `z10` binary
+z10 login --token <your-api-token> --server http://localhost:3000
+z10 project list                                           # confirms it works
+z10 project load <project-id>
 ```
 
-### Features
+### 4. Use the z10 skill from Claude Code
 
-- **Real-time streaming**: Agent edits appear instantly via SSE with visual highlights
-- **Infinite canvas editor**: DOM-based with CSS transforms, selection, and multi-page support
-- **Agent activity panel**: Live operation log with per-operation undo
-- **Plan management**: Free/Pro/Team tiers with Stripe billing
-- **API key auth**: SHA-256 hashed keys for headless agent access
-
-## Architecture
-
-```
-src/
-├── core/
-│   ├── types.ts       # Type definitions (Z10Document, Z10Node, Z10Command, etc.)
-│   ├── document.ts    # Document model operations
-│   ├── commands.ts    # 12 command executors with governance checks
-│   └── config.ts      # Configuration validation and management
-├── format/
-│   ├── parser.ts      # .z10.html → Z10Document
-│   └── serializer.ts  # Z10Document → .z10.html
-├── runtime/
-│   ├── faker.ts       # Seeded fake data (40+ generators)
-│   ├── template.ts    # Component template instantiation
-│   └── modes.ts       # Light/dark mode switching
-├── mcp/
-│   ├── tools.ts       # MCP tool definitions and handlers
-│   └── server.ts      # HTTP MCP server (Streamable HTTP transport)
-└── cli/
-    ├── index.ts       # CLI entry point (serve, new, info, config)
-    └── git.ts         # Git commands (branch, diff, merge, sync)
-```
-
-## Development
+The skill lives at [`skills/z10/`](skills/z10). Add it to Claude Code so the agent can design for you:
 
 ```bash
-npm install          # Install dependencies
-npm run build        # Compile TypeScript
-npm test             # Run tests (277 tests, ~65ms)
-npm run test:watch   # Watch mode
-npm run test:coverage # Coverage report
-npm run lint         # Type-check only
+# Option A — run Claude with the skill
+claude
+
+# Then in chat:
+/z10 build a qualtrics-style dashboard on page 2
 ```
 
-Zero runtime dependencies beyond `@modelcontextprotocol/sdk`. TypeScript strict mode, ES2022 modules, Vitest for testing.
+The skill wraps the CLI (`z10 project load`, `z10 dom`, `z10 exec`, `z10 component …`, `z10 tokens`) so the agent has a minimal DOM-style surface: `document.createElement`, `document.getElementById`, `element.style.*`, `element.setAttribute`, etc. Edits land in the canonical DOM on the server and stream into the browser canvas in real time.
+
+## What the agent can do
+
+- **Create / mutate nodes** — `document.createElement`, `appendChild`, `setAttribute`, `style.*`, `textContent`, `innerHTML`
+- **Query** — `document.getElementById` (also matches `data-z10-id`), `querySelector`, `querySelectorAll`
+- **Define components** — `z10 component create <Name>` with props, variants, styles, and a `{{placeholder}}` template
+- **Instantiate components** — set `data-z10-component="Name"` + `data-z10-props='{...}'` on any element
+- **Set design tokens** — `z10 tokens` or `z10.setTokens('semantic', {...})`
+
+See the skill ([`skills/z10/SKILL.md`](skills/z10/SKILL.md)) and the [HTML authoring guide](skills/z10/docs/html-authoring-guide.md) for patterns the agent is trained on.
+
+## Project layout
+
+```
+.
+├── src/                  # z10 core library + CLI + MCP server
+│   ├── core/             # Z10Document model, commands, config
+│   ├── dom/              # canonical DOM engine, transactions, patches, proxy
+│   ├── format/           # .z10.html parser + serializer
+│   ├── export/           # React / Vue / Svelte / Web Components codegen
+│   ├── mcp/              # MCP tool definitions + HTTP server
+│   └── cli/              # `z10` CLI (login, project, page, exec, component, …)
+├── web/                  # Next.js 16 editor + REST API + auth + Stripe
+├── skills/z10/           # Claude Code skill — how the agent uses z10
+└── docs/images/          # screenshots used in this README
+```
+
+## Dev commands
+
+```bash
+# Library + CLI
+npm run build            # tsc
+npm run dev              # tsc --watch
+npm test                 # vitest
+
+# Web app
+cd web
+npm run dev              # next dev
+npm run db:push          # drizzle schema sync
+npm run db:studio        # drizzle-kit studio
+```
+
+## Design branches
+
+`.z10.html` files are just HTML, so they version cleanly in Git. The CLI wraps the Git workflow:
+
+```bash
+z10 branch "dark-mode-exploration"           # creates z10/dark-mode-exploration
+z10 diff main..z10/dark-mode-exploration     # semantic, node-level diff
+z10 merge dark-mode-exploration --into main
+```
+
+## Code export
+
+Turn any page (or subtree) into a real framework component:
+
+```bash
+z10 export my-app.z10.html --format react --id dashboard --out Dashboard.tsx
+z10 export my-app.z10.html --format vue
+z10 export my-app.z10.html --format svelte
+z10 export my-app.z10.html --format web-components
+```
+
+Tailwind utilities are used where they map cleanly; the rest falls back to inline styles. Design tokens emit as a `:root { --var: value }` CSS block.
+
+## Governance
+
+Three levels control what the agent may edit, set via `z10 config <file> governance <level>`:
+
+- **full-edit** (default) — agent writes directly
+- **scoped-edit** — agent can only edit nodes marked `data-z10-agent-editable="true"`
+- **propose-approve** — agent writes to a staging branch; the designer accepts per change
 
 ## License
 

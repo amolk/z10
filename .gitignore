@@ -61,3 +61,4 @@ dist/
 
 # Screenshots
 *.png
+!docs/images/*.png
