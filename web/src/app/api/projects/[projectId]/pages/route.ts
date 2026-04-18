@@ -12,11 +12,15 @@ import { authenticateMcp } from "@/lib/mcp-auth";
 import { db } from "@/db";
 import { projects } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
+import { getCanonicalDOM, getCanonicalHTML } from "@/lib/canonical-dom";
+import { ensureCanonicalConfigured } from "@/lib/ensure-canonical-configured";
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
+  ensureCanonicalConfigured();
+
   const authResult = await authenticateMcp(request);
   if (!authResult) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -25,16 +29,22 @@ export async function GET(
   const { projectId } = await params;
   const { userId } = authResult;
 
-  const [project] = await db
-    .select({ content: projects.content })
-    .from(projects)
-    .where(and(eq(projects.id, projectId), eq(projects.ownerId, userId)));
+  // Read from canonical DOM (live in-memory state) rather than the DB's
+  // content column, which lags behind due to batched persistence.
+  const canonical = await getCanonicalDOM(projectId, async () => {
+    const [project] = await db
+      .select({ content: projects.content, lastTxId: projects.lastTxId })
+      .from(projects)
+      .where(and(eq(projects.id, projectId), eq(projects.ownerId, userId)));
+    if (!project) return null;
+    return { html: project.content ?? "", lastTxId: project.lastTxId };
+  });
 
-  if (!project) {
+  if (!canonical) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const content = project.content ?? "";
+  const content = getCanonicalHTML(projectId) ?? "";
 
   // Extract pages from z10 HTML content using the data-z10-page attribute pattern
   const pages: Array<{ name: string; rootNodeId: string; mode: string }> = [];
@@ -43,7 +53,7 @@ export async function GET(
   while ((match = pageRe.exec(content)) !== null) {
     const attrs = match[1];
     const name = match[2];
-    const idMatch = attrs.match(/id="([^"]*)"/);
+    const idMatch = attrs.match(/data-z10-id="([^"]*)"/);
     const modeMatch = attrs.match(/data-z10-mode="([^"]*)"/);
     pages.push({
       name,

@@ -133,12 +133,14 @@ function PageList({
     []
   );
 
-  const { content, updateContent } = useEditor();
+  const { content, updateContent, transformRef, projectId } = useEditor();
 
   const commitRename = useCallback(
     (pageId: string, name: string) => {
       setRenamingId(null);
       if (!name.trim()) return;
+
+      // Update React state (content + layer tree) immediately for UX.
       const parser = new DOMParser();
       const doc = parser.parseFromString(content, "text/html");
       const target = doc.querySelector(`[data-z10-id="${pageId}"]`);
@@ -146,8 +148,30 @@ function PageList({
         target.setAttribute("data-z10-page", name);
         updateContent(`<html${doc.documentElement.getAttribute("data-z10-project") ? ` data-z10-project="${doc.documentElement.getAttribute("data-z10-project")}"` : ""}>\n${doc.documentElement.innerHTML}\n</html>`);
       }
+
+      // Persist to server. If the page is currently active, mutating the
+      // live DOM lets useMutationBridge ship the change. Otherwise the page
+      // isn't rendered in the canvas at all, so we have to call /transact
+      // directly — the observer can't see what's not on screen.
+      const liveEl = transformRef.current?.querySelector(
+        `[data-z10-id="${pageId}"]`,
+      );
+      if (liveEl) {
+        liveEl.setAttribute("data-z10-page", name);
+      } else {
+        const safeId = pageId.replace(/"/g, '\\"');
+        const safeName = name.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+        const code = `const el = document.querySelector('[data-z10-id="${safeId}"]'); if (el) el.setAttribute('data-z10-page', '${safeName}');`;
+        fetch(`/api/projects/${projectId}/transact`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code, manifest: null, subtreeRootNid: null }),
+        }).catch(() => {
+          /* best-effort; a later refresh will reveal the stale value */
+        });
+      }
     },
-    [content, updateContent]
+    [content, updateContent, transformRef, projectId]
   );
 
   const startRename = useCallback(

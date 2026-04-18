@@ -17,6 +17,10 @@ export function ensureCanonicalConfigured(): void {
   if (configured) return;
   configured = true;
   configureCanonicalDOM({
+    // Persist on every commit so in-memory state survives HMR/restart.
+    // Batching was hiding data loss when the module reloaded before the
+    // 10-commit / 60s threshold fired.
+    persistEveryNCommits: 1,
     onPersist: async (projectId, html, txId) => {
       await db
         .update(projects)

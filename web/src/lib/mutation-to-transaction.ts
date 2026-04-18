@@ -24,7 +24,7 @@ export function mutationRecordsToTransaction(records: MutationRecord[]): string 
         const nid = node.getAttribute?.("data-z10-id");
         if (!nid) continue;
         statements.push(
-          `{ const el = root.querySelector('[data-z10-id="${escapeStr(nid)}"]'); if (el) el.remove(); }`
+          `{ const el = document.querySelector('[data-z10-id="${escapeStr(nid)}"]'); if (el) el.remove(); }`
         );
       }
 
@@ -45,12 +45,12 @@ export function mutationRecordsToTransaction(records: MutationRecord[]): string 
         const html = escapeStr(node.outerHTML);
         if (nextNid) {
           statements.push(
-            `{ const ref = root.querySelector('[data-z10-id="${escapeStr(nextNid)}"]'); ` +
+            `{ const ref = document.querySelector('[data-z10-id="${escapeStr(nextNid)}"]'); ` +
             `if (ref && ref.parentElement) ref.insertAdjacentHTML('beforebegin', '${html}'); }`
           );
         } else {
           statements.push(
-            `{ const parent = root.querySelector('[data-z10-id="${escapeStr(parentNid)}"]'); ` +
+            `{ const parent = document.querySelector('[data-z10-id="${escapeStr(parentNid)}"]'); ` +
             `if (parent) parent.insertAdjacentHTML('beforeend', '${html}'); }`
           );
         }
@@ -68,12 +68,12 @@ export function mutationRecordsToTransaction(records: MutationRecord[]): string 
       const value = el.getAttribute(attrName);
       if (value === null) {
         statements.push(
-          `{ const el = root.querySelector('[data-z10-id="${escapeStr(nid)}"]'); ` +
+          `{ const el = document.querySelector('[data-z10-id="${escapeStr(nid)}"]'); ` +
           `if (el) el.removeAttribute('${escapeStr(attrName)}'); }`
         );
       } else {
         statements.push(
-          `{ const el = root.querySelector('[data-z10-id="${escapeStr(nid)}"]'); ` +
+          `{ const el = document.querySelector('[data-z10-id="${escapeStr(nid)}"]'); ` +
           `if (el) el.setAttribute('${escapeStr(attrName)}', '${escapeStr(value)}'); }`
         );
       }
@@ -89,7 +89,7 @@ export function mutationRecordsToTransaction(records: MutationRecord[]): string 
  * Used for undo/redo restores where incremental patching isn't feasible.
  */
 export function fullReplaceTransaction(innerHTML: string): string {
-  return `root.innerHTML = '${escapeStr(innerHTML)}';`;
+  return `document.body.innerHTML = '${escapeStr(innerHTML)}';`;
 }
 
 /** Walk up from a target element to find the nearest ancestor with a data-z10-id. */

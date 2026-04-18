@@ -173,6 +173,9 @@ export type EditorState = {
   // Hover from layers panel → canvas highlight
   hoveredLayerId: string | null;
   setHoveredLayerId: (id: string | null) => void;
+
+  /** Project ID — exposed so panels can issue transact calls for non-active-page edits. */
+  projectId: string;
 };
 
 // ─── Context ────────────────────────────────────────────────
@@ -188,9 +191,11 @@ export function useEditor(): EditorState {
 // ─── Provider ───────────────────────────────────────────────
 
 export function EditorProvider({
+  projectId,
   initialContent,
   children,
 }: {
+  projectId: string;
   initialContent: string;
   children: ReactNode;
 }) {
@@ -745,6 +750,7 @@ export function EditorProvider({
         reorderPages,
         hoveredLayerId,
         setHoveredLayerId,
+        projectId,
       }}
     >
       {children}

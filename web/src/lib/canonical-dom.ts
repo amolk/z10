@@ -389,6 +389,19 @@ export async function evictCanonicalDOM(projectId: string): Promise<void> {
 }
 
 /**
+ * Discard a project's canonical DOM WITHOUT persisting.
+ * Use when the canonical DOM is known to be stale (e.g., after an
+ * out-of-band DB write like PUT /api/projects/:id) and persisting would
+ * overwrite newer authoritative content.
+ */
+export function discardCanonicalDOM(projectId: string): void {
+  const canonical = instances.get(projectId);
+  if (!canonical) return;
+  canonical.window.close();
+  instances.delete(projectId);
+}
+
+/**
  * Get the raw canonical DOM instance (if loaded).
  * Used by component routes to update headHTML without evicting.
  */

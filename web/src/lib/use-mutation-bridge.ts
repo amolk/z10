@@ -67,7 +67,12 @@ export function useMutationBridge(
     inflightRef.current++;
     syncStateRef.current = "syncing";
 
-    transactRef.current(code, pageIdRef.current).then((result) => {
+    // Run at document scope (null) rather than scoping to the active page.
+    // Mutations can reference nodes outside the active page subtree — e.g.,
+    // deleting a page switches the active page, so the removed page is no
+    // longer under the new active page's scope. Document-scope transactions
+    // can address any data-z10-id in the canonical DOM.
+    transactRef.current(code, null).then((result) => {
       inflightRef.current--;
       if (inflightRef.current === 0) {
         syncStateRef.current = "synced";

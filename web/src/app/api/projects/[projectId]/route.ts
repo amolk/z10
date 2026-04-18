@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { db } from "@/db";
 import { projects } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
+import { discardCanonicalDOM } from "@/lib/canonical-dom";
 
 export async function GET(
   _request: Request,
@@ -63,6 +64,11 @@ export async function PUT(
   if (!updated) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+
+  // PUT bypasses the canonical DOM (it writes HTML directly to the DB).
+  // Any cached canonical DOM is now stale — drop it without persisting so
+  // the next sync/transact reloads from this fresh content.
+  discardCanonicalDOM(projectId);
 
   return NextResponse.json({ saved: true, updatedAt: updated.updatedAt });
 }

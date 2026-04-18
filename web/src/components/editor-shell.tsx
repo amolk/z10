@@ -30,7 +30,7 @@ export function EditorShell({
   initialContent: string;
 }) {
   return (
-    <EditorProvider initialContent={initialContent}>
+    <EditorProvider projectId={projectId} initialContent={initialContent}>
       <EditorShellInner
         projectId={projectId}
         projectName={projectName}
