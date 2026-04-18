@@ -91,6 +91,7 @@ export function reconcileChildren(
   // Reorder/insert children to match target order
   for (let i = 0; i < targetChildren.length; i++) {
     const target = targetChildren[i];
+    if (!target) continue;
     const current = liveParent.children[i] as Element | undefined;
 
     if (current !== target) {

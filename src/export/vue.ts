@@ -413,6 +413,7 @@ function buildVueAttributes(el: Element, className: string, style: StyleMap): st
 
   for (let i = 0; i < el.attributes.length; i++) {
     const attr = el.attributes[i];
+    if (!attr) continue;
     if (attr.name.startsWith('data-z10-')) continue;
     if (attr.name === 'style') continue;
     if (attr.name === 'class') continue;
@@ -473,7 +474,7 @@ function getDirectTextContent(el: Element): string {
   let text = '';
   for (let i = 0; i < el.childNodes.length; i++) {
     const child = el.childNodes[i];
-    if (child.nodeType === 3) {
+    if (child && child.nodeType === 3) {
       text += child.textContent || '';
     }
   }

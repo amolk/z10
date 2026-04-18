@@ -164,6 +164,11 @@ export class LocalProxy {
     return this.rootElement.innerHTML;
   }
 
+  /** Get the root element of the proxied document. */
+  getRootElement(): Element {
+    return this.rootElement;
+  }
+
   /** Get the current lastSeenTxId. */
   get currentTxId(): number {
     return this.lastSeenTxId;
@@ -353,7 +358,7 @@ export class LocalProxy {
     // Also copy text nodes at this level
     for (let i = 0; i < el.childNodes.length; i++) {
       const node = el.childNodes[i];
-      if (node.nodeType === 3) { // Text node
+      if (node && node.nodeType === 3) { // Text node
         clone.appendChild(node.cloneNode(false));
       }
     }

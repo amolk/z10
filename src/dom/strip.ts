@@ -50,8 +50,8 @@ function removeMatchingAttrs(el: Element, predicate: (name: string) => boolean):
   const toRemove: string[] = [];
   const attrs = el.attributes;
   for (let i = 0; i < attrs.length; i++) {
-    if (predicate(attrs[i].name)) {
-      toRemove.push(attrs[i].name);
+    if (predicate(attrs[i]!.name)) {
+      toRemove.push(attrs[i]!.name);
     }
   }
   for (const name of toRemove) {

@@ -42,7 +42,7 @@ export class PatchRingBuffer {
     const ordered = this.getAllOrdered();
 
     // Check if the requested txId is still in the buffer
-    if (afterTxId > 0 && ordered.length > 0 && ordered[0].txId > afterTxId) {
+    if (afterTxId > 0 && ordered.length > 0 && ordered[0]!.txId > afterTxId) {
       // The oldest patch in buffer is newer than what was requested — gap
       return null;
     }
@@ -60,7 +60,7 @@ export class PatchRingBuffer {
     const start = this.count < this.capacity ? 0 : this.head;
     for (let i = 0; i < this.count; i++) {
       const idx = (start + i) % this.capacity;
-      result.push(this.buffer[idx]);
+      result.push(this.buffer[idx]!);
     }
     return result;
   }
@@ -69,7 +69,7 @@ export class PatchRingBuffer {
   get latestTxId(): number {
     if (this.count === 0) return 0;
     const lastIdx = (this.head - 1 + this.capacity) % this.capacity;
-    return this.buffer[lastIdx].txId;
+    return this.buffer[lastIdx]!.txId;
   }
 
   /** Number of patches currently stored. */

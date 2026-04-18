@@ -65,7 +65,7 @@ export function setInitialTimestamps(el: Element, ts: number): void {
   // Set timestamps for existing attributes (excluding data-z10-* system attrs)
   const attrs = el.attributes;
   for (let i = 0; i < attrs.length; i++) {
-    const name = attrs[i].name;
+    const name = attrs[i]!.name;
     if (name.startsWith('data-z10-')) continue; // skip system attributes
     if (name === 'style') {
       // For style attribute, set per-property timestamps

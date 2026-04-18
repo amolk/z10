@@ -130,13 +130,7 @@ export class TransactionEngine {
       };
     }
 
-    // Step 2: Fast pre-check using ts-tree
-    if (subtreeRootNid) {
-      const treeTs = manifest.nodes.get(subtreeRootNid)?.[
-        'data-z10-ts-tree' as keyof typeof manifest.nodes extends string ? never : string
-      ];
-      // Pre-check is optimization only — skip if manifest doesn't have tree ts
-    }
+    // Step 2: Fast pre-check using ts-tree (optimization only — skip if manifest doesn't have tree ts)
 
     // Step 3: Clone subtree for sandbox execution
     const sandboxClone = subtreeRoot.cloneNode(true) as Element;
@@ -338,9 +332,9 @@ export class TransactionEngine {
     // Copy attributes from sandbox to live
     const sandboxAttrs = sandbox.attributes;
     for (let i = 0; i < sandboxAttrs.length; i++) {
-      const name = sandboxAttrs[i].name;
+      const name = sandboxAttrs[i]!.name;
       if (name.startsWith('data-z10-')) continue; // skip system attributes
-      const sandboxVal = sandboxAttrs[i].value;
+      const sandboxVal = sandboxAttrs[i]!.value;
       if (live.getAttribute(name) !== sandboxVal) {
         live.setAttribute(name, sandboxVal);
       }
@@ -350,7 +344,7 @@ export class TransactionEngine {
     const liveAttrs = live.attributes;
     const toRemove: string[] = [];
     for (let i = 0; i < liveAttrs.length; i++) {
-      const name = liveAttrs[i].name;
+      const name = liveAttrs[i]!.name;
       if (name.startsWith('data-z10-')) continue; // keep system attributes
       if (!sandbox.hasAttribute(name)) {
         toRemove.push(name);

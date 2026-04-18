@@ -405,6 +405,7 @@ function buildJsxAttributes(el: Element, className: string, style: StyleMap): st
   // Add non-z10 attributes from the element
   for (let i = 0; i < el.attributes.length; i++) {
     const attr = el.attributes[i];
+    if (!attr) continue;
     if (attr.name.startsWith('data-z10-')) continue;
     if (attr.name === 'style') continue; // already handled
     if (attr.name === 'class') continue; // mapped to className via Tailwind
@@ -490,7 +491,7 @@ function getDirectTextContent(el: Element): string {
   let text = '';
   for (let i = 0; i < el.childNodes.length; i++) {
     const child = el.childNodes[i];
-    if (child.nodeType === 3 /* TEXT_NODE */) {
+    if (child && child.nodeType === 3 /* TEXT_NODE */) {
       text += child.textContent || '';
     }
   }

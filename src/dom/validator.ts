@@ -181,8 +181,8 @@ export function buildManifest(subtreeRoot: Element): TimestampManifest {
     // Read all attributes looking for timestamps
     const attrs = el.attributes;
     for (let i = 0; i < attrs.length; i++) {
-      const name = attrs[i].name;
-      const value = parseInt(attrs[i].value, 10);
+      const name = attrs[i]!.name;
+      const value = parseInt(attrs[i]!.value, 10);
       if (isNaN(value)) continue;
 
       if (name === TS_NODE) entry[TS_NODE] = value;

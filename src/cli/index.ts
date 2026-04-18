@@ -282,12 +282,23 @@ async function cmdExport(): Promise<void> {
 
   let result: { code: string; components: string[]; tokensCss?: string };
 
+  // Build a DOM Element from the document for the exporters
+  const { Window } = await import('happy-dom');
+  const win = new Window();
+  win.document.documentElement.innerHTML = serializeZ10Html(doc);
+  const rootEl = win.document.body as unknown as Element;
+  const selector = id ? `[data-z10-id="${id}"]` : undefined;
+  const context = {
+    components: Array.from(doc.components.values()),
+    tokens: { primitives: doc.tokens.primitives, semantic: doc.tokens.semantic },
+  };
+
   if (format === 'vue') {
-    result = exportVue(doc, { id, typescript: !useJs, includeTokens: true });
+    result = exportVue(rootEl, { selector, typescript: !useJs, includeTokens: true, context });
   } else if (format === 'svelte') {
-    result = exportSvelte(doc, { id, typescript: !useJs, includeTokens: true });
+    result = exportSvelte(rootEl, { selector, typescript: !useJs, includeTokens: true, context });
   } else if (format === 'react') {
-    result = exportReact(doc, { id, typescript: !useJs, includeTokens: true });
+    result = exportReact(rootEl, { selector, typescript: !useJs, includeTokens: true, context });
   } else if (format === 'web-components') {
     const schemas = Array.from(doc.components.values());
     result = exportWebComponents(schemas, {
